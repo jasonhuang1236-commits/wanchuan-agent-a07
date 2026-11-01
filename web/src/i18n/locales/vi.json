@@ -8759,6 +8759,9 @@
     "Zhipu": "Zhipu",
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Ensure Function Descriptions": "Bổ sung mô tả hàm",
+    "Fill missing, null, or empty function descriptions in Chat, legacy functions, and Responses; leave built-in tools unchanged": "Bổ sung mô tả hàm bị thiếu, null hoặc chuỗi rỗng trong Chat, functions cũ và Responses; không sửa công cụ tích hợp",
+    "Rule {{line}} function description must be a non-empty string": "Mô tả hàm của quy tắc {{line}} phải là chuỗi không rỗng"
   }
 }

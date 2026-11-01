@@ -8759,6 +8759,9 @@
     "Zhipu": "Zhipu",
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Ensure Function Descriptions": "Дополнить описания функций",
+    "Fill missing, null, or empty function descriptions in Chat, legacy functions, and Responses; leave built-in tools unchanged": "Заполнить отсутствующие, null или пустые описания функций в Chat, устаревших functions и Responses; не изменять встроенные инструменты",
+    "Rule {{line}} function description must be a non-empty string": "Описание функции в правиле {{line}} должно быть непустой строкой"
   }
 }

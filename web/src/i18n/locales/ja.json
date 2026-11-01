@@ -8759,6 +8759,9 @@
     "Zhipu": "Zhipu",
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム"
+    "Zoom": "ズーム",
+    "Ensure Function Descriptions": "関数ツールの説明を補完",
+    "Fill missing, null, or empty function descriptions in Chat, legacy functions, and Responses; leave built-in tools unchanged": "Chat、旧形式の functions、Responses で欠落、null、空文字列の関数説明を補完します。組み込みツールは変更しません",
+    "Rule {{line}} function description must be a non-empty string": "ルール {{line}} の関数説明は空でない文字列である必要があります"
   }
 }

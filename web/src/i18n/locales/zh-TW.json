@@ -8759,6 +8759,9 @@
     "Zhipu": "智譜",
     "Zhipu GLM": "智譜GLM",
     "Zhipu V4": "智譜 V4",
-    "Zoom": "縮放"
+    "Zoom": "縮放",
+    "Ensure Function Descriptions": "補齊函式工具描述",
+    "Fill missing, null, or empty function descriptions in Chat, legacy functions, and Responses; leave built-in tools unchanged": "補齊 Chat、舊版 functions 和 Responses 中缺失、null 或空字串的函式描述；不修改內建工具",
+    "Rule {{line}} function description must be a non-empty string": "規則 {{line}} 的函式描述必須是非空字串"
   }
 }

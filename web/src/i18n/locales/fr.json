@@ -8759,6 +8759,9 @@
     "Zhipu": "Zhipu",
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Ensure Function Descriptions": "Compléter les descriptions de fonctions",
+    "Fill missing, null, or empty function descriptions in Chat, legacy functions, and Responses; leave built-in tools unchanged": "Compléter les descriptions de fonctions absentes, nulles ou vides dans Chat, les anciennes functions et Responses ; ne pas modifier les outils intégrés",
+    "Rule {{line}} function description must be a non-empty string": "La description de fonction de la règle {{line}} doit être une chaîne non vide"
   }
 }

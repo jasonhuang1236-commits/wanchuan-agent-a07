@@ -81,7 +81,7 @@ type ConditionOperation struct {
 
 type ParamOperation struct {
 	Path       string               `json:"path"`
-	Mode       string               `json:"mode"` // delete, set, move, copy, prepend, append, trim_prefix, trim_suffix, ensure_prefix, ensure_suffix, trim_space, to_lower, to_upper, replace, regex_replace, return_error, prune_objects, set_header, delete_header, copy_header, move_header, pass_headers, sync_fields
+	Mode       string               `json:"mode"` // delete, set, move, copy, prepend, append, trim_prefix, trim_suffix, ensure_prefix, ensure_suffix, trim_space, to_lower, to_upper, replace, regex_replace, return_error, prune_objects, set_header, delete_header, copy_header, move_header, pass_headers, sync_fields, ensure_function_descriptions
 	Value      any                  `json:"value"`
 	KeepOrigin bool                 `json:"keep_origin"`
 	From       string               `json:"from,omitempty"`
@@ -900,6 +900,11 @@ func applyOperations(jsonData []byte, operations []ParamOperation, conditionCont
 		}
 
 		switch op.Mode {
+		case "ensure_function_descriptions":
+			if op.Path != "" || op.From != "" || op.To != "" || op.KeepOrigin {
+				return nil, fmt.Errorf("ensure_function_descriptions only accepts value and conditions")
+			}
+			result, err = ensureFunctionDescriptions(result, op.Value)
 		case "delete":
 			for _, path := range opPaths {
 				result, err = deleteValue(result, path)

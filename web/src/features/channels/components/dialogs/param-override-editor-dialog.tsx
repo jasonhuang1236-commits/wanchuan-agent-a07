@@ -112,6 +112,10 @@ const OPERATION_MODE_OPTIONS = [
   { label: 'Trim Suffix', value: 'trim_suffix' },
   { label: 'Ensure Prefix', value: 'ensure_prefix' },
   { label: 'Ensure Suffix', value: 'ensure_suffix' },
+  {
+    label: 'Ensure Function Descriptions',
+    value: 'ensure_function_descriptions',
+  },
   { label: 'Trim Space', value: 'trim_space' },
   { label: 'To Lowercase', value: 'to_lower' },
   { label: 'To Uppercase', value: 'to_upper' },
@@ -176,6 +180,7 @@ const MODE_META: Record<
   trim_suffix: { path: true, value: true },
   ensure_prefix: { path: true, value: true },
   ensure_suffix: { path: true, value: true },
+  ensure_function_descriptions: { value: true },
   trim_space: { path: true },
   to_lower: { path: true },
   to_upper: { path: true },
@@ -194,6 +199,7 @@ const VALUE_REQUIRED_MODES = new Set([
   'trim_suffix',
   'ensure_prefix',
   'ensure_suffix',
+  'ensure_function_descriptions',
   'set_header',
   'return_error',
   'prune_objects',
@@ -231,6 +237,8 @@ const MODE_DESCRIPTIONS: Record<string, string> = {
   trim_suffix: 'Remove string suffix',
   ensure_prefix: 'Ensure the string has a specified prefix',
   ensure_suffix: 'Ensure the string has a specified suffix',
+  ensure_function_descriptions:
+    'Fill missing, null, or empty function descriptions in Chat, legacy functions, and Responses; leave built-in tools unchanged',
   trim_space: 'Trim leading/trailing whitespace',
   to_lower: 'Convert string to lowercase',
   to_upper: 'Convert string to uppercase',
@@ -518,7 +526,11 @@ const normalizeOperation = (
   mode: OPERATION_MODE_VALUES.has(operation.mode as string)
     ? (operation.mode as string)
     : 'set',
-  value_text: toValueText(operation.value),
+  value_text:
+    operation.mode === 'ensure_function_descriptions' &&
+    typeof operation.value === 'string'
+      ? JSON.stringify(operation.value)
+      : toValueText(operation.value),
   prune_draft:
     operation.mode === 'prune_objects'
       ? parsePruneObjectsDraft(toValueText(operation.value))
@@ -958,6 +970,16 @@ const validateOperations = (
       return t('Rule {{line}} is missing value', { line })
     }
 
+    if (mode === 'ensure_function_descriptions') {
+      const value = parseLooseValue(op.value_text)
+      if (typeof value !== 'string' || !value.trim()) {
+        return t(
+          'Rule {{line}} function description must be a non-empty string',
+          { line }
+        )
+      }
+    }
+
     if (mode === 'return_error') {
       const raw = op.value_text.trim()
       if (!raw) return t('Rule {{line}} is missing value', { line })
@@ -1120,7 +1142,13 @@ const buildOperationsJson = (
     if (meta.value) payload.value = parseLooseValue(operation.value_text)
     if (meta.keepOrigin && operation.keep_origin) payload.keep_origin = true
     if (meta.from) payload.from = fromValue
-    if (!meta.to && operation.to.trim()) payload.to = toValue
+    if (
+      !meta.to &&
+      mode !== 'ensure_function_descriptions' &&
+      operation.to.trim()
+    ) {
+      payload.to = toValue
+    }
     if (meta.to) payload.to = toValue
     if (meta.pathAlias) {
       if (!payload.from && pathValue) payload.from = pathValue

@@ -540,6 +540,8 @@ export const STATIC_I18N_KEYS = [
   'Append',
   'Ensure Prefix',
   'Ensure Suffix',
+  'Ensure Function Descriptions',
+  'Fill missing, null, or empty function descriptions in Chat, legacy functions, and Responses; leave built-in tools unchanged',
   'Trim Prefix',
   'Trim Suffix',
   'Trim Space',
