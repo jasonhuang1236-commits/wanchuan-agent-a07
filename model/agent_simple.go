@@ -1674,7 +1674,7 @@ func redeemAgentSimpleCodeTx(tx *gorm.DB, code *Redemption, actorID int) error {
 	return saveAgentSimpleAccountTx(tx, before, account, actorID, "code_redeem", "redemption", strconv.Itoa(code.Id), "Redeem simplified agent code", "redeem:"+strconv.Itoa(code.Id))
 }
 
-func creditAgentSimpleCashTx(tx *gorm.DB, agentID, actorID int, quota, paidQuota int64, referenceID, reason string) error {
+func creditAgentSimpleCashTx(tx *gorm.DB, agentID, actorID int, quota, paidQuota int64, kind, referenceID, reason string) error {
 	if agentID <= 0 || quota <= 0 || quota > int64(common.MaxWalletQuota) || paidQuota <= 0 || paidQuota > int64(common.MaxWalletQuota) {
 		return ErrAgentSimpleInvalid
 	}
@@ -1687,15 +1687,22 @@ func creditAgentSimpleCashTx(tx *gorm.DB, agentID, actorID int, quota, paidQuota
 	if err := applyAgentSimpleRepaymentTx(tx, account, repayment); err != nil {
 		return err
 	}
-	remaining, err := common.WalletQuotaFromDecimalStrict(
-		decimal.NewFromInt(quota).Mul(decimal.NewFromInt(paidQuota - repayment)).Div(decimal.NewFromInt(paidQuota)).Truncate(0),
-	)
-	if err != nil || simpleAvailableQuota(account) > int64(common.MaxWalletQuota)-int64(remaining) {
+	var remaining int64
+	if kind == "repayment" {
+		remaining, err = AgentMoneyRatio(paidQuota-repayment, 10, 9, false)
+	} else {
+		remaining, err = AgentMoneyRatio(quota, paidQuota-repayment, paidQuota, false)
+	}
+	if err != nil || simpleAvailableQuota(account) > int64(common.MaxWalletQuota)-remaining {
 		return ErrWalletQuotaLimitExceeded
 	}
-	account.CashQuota += int64(remaining)
+	account.CashQuota += remaining
 	account.LastActivityAt = common.GetTimestamp()
-	return saveAgentSimpleAccountTx(tx, before, account, actorID, "cash_recharge", "topup", referenceID, reason, "topup:"+referenceID)
+	ledgerKind := "cash_recharge"
+	if kind == "repayment" {
+		ledgerKind = "repayment"
+	}
+	return saveAgentSimpleAccountTx(tx, before, account, actorID, ledgerKind, "topup", referenceID, reason, "topup:"+referenceID)
 }
 
 // RedeemAgentSimpleCodeTx is used by the normal redemption flow so simple
@@ -1996,13 +2003,19 @@ func RepayAgentSimpleCredit(identity AuthSessionIdentity, request AgentSimpleRep
 		if err != nil {
 			return err
 		}
-		if request.Quota > account.CreditOutstandingQuota {
+		if err := validateAgentSimpleRepayment(account.CreditOutstandingQuota, request.Quota); err != nil {
 			return ErrAgentSimpleInvalid
 		}
 		before := *account
-		if err := applyAgentSimpleRepaymentTx(tx, account, request.Quota); err != nil {
+		repaid := min(request.Quota, account.CreditOutstandingQuota)
+		if err := applyAgentSimpleRepaymentTx(tx, account, repaid); err != nil {
 			return err
 		}
+		change, err := AgentMoneyRatio(request.Quota-repaid, 10, 9, false)
+		if err != nil || simpleAvailableQuota(account) > int64(common.MaxWalletQuota)-change {
+			return ErrWalletQuotaLimitExceeded
+		}
+		account.CashQuota += change
 		if err := saveAgentSimpleAccountTx(tx, before, account, identity.UserID, "repayment", "agent", strconv.Itoa(request.AgentUserID), strings.TrimSpace(request.Reason), request.RequestID); err != nil {
 			return err
 		}

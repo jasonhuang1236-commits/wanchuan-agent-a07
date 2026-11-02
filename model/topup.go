@@ -111,7 +111,11 @@ func creditTopUpQuota(tx *gorm.DB, entry LedgerEntry) (*LedgerResult, error) {
 			if err != nil || paidQuota <= 0 {
 				return nil, ErrTopUpQuotaLimitExceeded
 			}
-			if err := creditAgentSimpleCashTx(tx, topUp.UserId, 0, int64(entry.Delta), int64(paidQuota), topUp.TradeNo, "Online agent balance recharge"); err != nil {
+			reason := "Online agent balance recharge"
+			if topUp.AgentSimpleKind == "repayment" {
+				reason = "Online agent credit repayment"
+			}
+			if err := creditAgentSimpleCashTx(tx, topUp.UserId, 0, int64(entry.Delta), int64(paidQuota), topUp.AgentSimpleKind, topUp.TradeNo, reason); err != nil {
 				return nil, err
 			}
 			var user User

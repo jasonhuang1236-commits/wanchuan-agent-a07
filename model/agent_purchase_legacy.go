@@ -151,7 +151,7 @@ func PrepareAgentLegacyRedemptionOperation(identity AuthSessionIdentity, action,
 			}
 			request.RequestID = requestID
 			var code Redemption
-			if err := scope.query(tx).First(&code, request.ID).Error; err != nil {
+			if err := scope.query(tx).Where("(agent_simple_mode IS NULL OR agent_simple_mode = '')").First(&code, request.ID).Error; err != nil {
 				return err
 			}
 			context, err = buildAgentLegacyUpdateContextTx(tx, policy, scope, &code, request.RedemptionUpdateRequest, request.StatusOnly)
@@ -167,7 +167,7 @@ func PrepareAgentLegacyRedemptionOperation(identity AuthSessionIdentity, action,
 				return err
 			}
 			request.RequestID = requestID
-			query := scope.query(tx)
+			query := scope.query(tx).Where("(agent_simple_mode IS NULL OR agent_simple_mode = '')")
 			if scope.IsAdmin() && request.AgentUserID > 0 {
 				query = query.Where("budget_agent_id = ?", request.AgentUserID)
 			}
@@ -182,6 +182,9 @@ func PrepareAgentLegacyRedemptionOperation(identity AuthSessionIdentity, action,
 			var rows []Redemption
 			if err := query.Order("id ASC").Find(&rows).Error; err != nil {
 				return err
+			}
+			if !request.InvalidOnly && len(rows) != len(request.IDs) {
+				return ErrRedemptionInvalidRequest
 			}
 			context, err = buildAgentLegacyDeleteContextTx(tx, policy, scope, rows, request)
 			if err != nil {

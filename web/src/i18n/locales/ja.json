@@ -6433,6 +6433,7 @@
     "Repair Channel Consistency": "チャネル整合性を修復",
     "Repair channel consistency?": "チャネル整合性を修復しますか？",
     "Repay amount due": "返済する",
+    "Repay the debt in CNY, rounded up to the nearest fen. Any change is added to your agent balance.": "人民元で返済し、1分単位に切り上げます。お釣りは代理店残高に加算されます。",
     "Repayment": "返済",
     "Repayment ($)": "返済額（$）",
     "Repayment amount": "返済額",

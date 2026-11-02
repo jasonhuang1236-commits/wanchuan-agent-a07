@@ -6433,6 +6433,7 @@
     "Repair Channel Consistency": "Réparer la cohérence des canaux",
     "Repair channel consistency?": "Réparer la cohérence des canaux ?",
     "Repay amount due": "Rembourser",
+    "Repay the debt in CNY, rounded up to the nearest fen. Any change is added to your agent balance.": "Remboursez en CNY, arrondi au fen supérieur. Le surplus est crédité au solde agent.",
     "Repayment": "Remboursement",
     "Repayment ($)": "Remboursement ($)",
     "Repayment amount": "Montant remboursé",

@@ -29,6 +29,18 @@ type AgentSimpleRechargeView struct {
 	PayYuan float64           `json:"pay_yuan"`
 }
 
+// The gateway accepts whole fen; preserve sub-fen change rather than strand debt.
+func validateAgentSimpleRepayment(outstanding, paidQuota int64) error {
+	if validateAgentSimpleAmount(outstanding) != nil || validateAgentSimpleAmount(paidQuota) != nil {
+		return ErrAgentSimpleInvalid
+	}
+	maximum := decimal.NewFromInt(outstanding).Mul(decimal.NewFromInt(100)).Div(decimal.NewFromFloat(common.QuotaPerUnit)).Ceil().Mul(decimal.NewFromFloat(common.QuotaPerUnit)).Div(decimal.NewFromInt(100))
+	if decimal.NewFromInt(paidQuota).GreaterThan(maximum) {
+		return ErrAgentSimpleInvalid
+	}
+	return nil
+}
+
 func QuoteAgentSimpleRecharge(request AgentSimpleRechargeRequest) (*AgentSimpleRechargeQuote, error) {
 	if validateAgentSimpleRequestID(request.RequestID) != nil || (request.Kind != "recharge" && request.Kind != "repayment") || request.PaymentMethod == "" || len(request.PaymentMethod) > 50 || !isSimpleEpayMethod(request.PaymentMethod) || len(request.Amount) > 24 || request.Amount == "" {
 		return nil, ErrAgentSimpleInvalid
@@ -102,7 +114,7 @@ func CreateAgentSimpleRecharge(identity AuthSessionIdentity, request AgentSimple
 			}
 		} else {
 			paidQuota, err := common.WalletQuotaFromDecimalStrict(decimal.NewFromInt(quote.PayFen).Div(decimal.NewFromInt(100)).Mul(decimal.NewFromFloat(common.QuotaPerUnit)))
-			if err != nil || paidQuota <= 0 || int64(paidQuota) > account.CreditOutstandingQuota {
+			if err != nil || validateAgentSimpleRepayment(account.CreditOutstandingQuota, int64(paidQuota)) != nil {
 				return ErrAgentSimpleInvalid
 			}
 		}

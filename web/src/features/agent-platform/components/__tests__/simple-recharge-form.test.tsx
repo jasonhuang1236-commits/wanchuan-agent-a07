@@ -7,13 +7,16 @@ import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import { SimpleRechargeForm } from '../simple-recharge-form'
 
-function mount(kind: 'recharge' | 'repayment' = 'recharge') {
+function mount(
+  kind: 'recharge' | 'repayment' = 'recharge',
+  amountDue = 4_525_000
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>
-      <SimpleRechargeForm kind={kind} amountDue={4_525_000} onClose={vi.fn()} />
+      <SimpleRechargeForm kind={kind} amountDue={amountDue} onClose={vi.fn()} />
     </QueryClientProvider>
   )
 }
@@ -120,3 +123,25 @@ test('excess precision is rejected before creating a payment intent', async () =
   ).toBeVisible()
   expect(request).not.toHaveBeenCalled()
 })
+
+test.each([1, 2000, 4500])(
+  'a debt of %d quota can be settled with a one-fen payment',
+  async (amountDue) => {
+    const request = vi.spyOn(api, 'request').mockResolvedValue({
+      data: {
+        success: true,
+        data: { url: 'https://payment.example.test', data: { money: '0.01' } },
+      },
+    })
+    mount('repayment', amountDue)
+    expect(
+      await screen.findByRole('textbox', { name: 'Repayment amount (CNY)' })
+    ).toHaveValue('0.01')
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to payment' }))
+    await waitFor(() => expect(request).toHaveBeenCalledOnce())
+    expect(request.mock.calls[0][0].data).toMatchObject({
+      amount: '0.01',
+      kind: 'repayment',
+    })
+  }
+)

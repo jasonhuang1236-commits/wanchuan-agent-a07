@@ -20,7 +20,26 @@ For commercial licensing, please contact support@quantumnous.com
 import { getCurrencyDisplay } from '@/lib/currency'
 
 export function formatAgentCash(quota: number): string {
-  return `¥${(quota / getCurrencyDisplay().config.quotaPerUnit).toFixed(2)}`
+  const amount = (quota / getCurrencyDisplay().config.quotaPerUnit)
+    .toFixed(6)
+    .replace(/(\.\d{2,}?)0+$/, '$1')
+  return `¥${amount}`
+}
+
+/** A gateway payment must cover the whole debt even when it includes sub-fen units. */
+export function agentRepaymentAmount(quota: number): string {
+  const unit = getCurrencyDisplay().config.quotaPerUnit
+  if (
+    !Number.isSafeInteger(quota) ||
+    quota <= 0 ||
+    !Number.isSafeInteger(unit) ||
+    unit <= 0
+  ) {
+    return ''
+  }
+  const numerator = BigInt(quota) * 100n
+  const fen = (numerator + BigInt(unit) - 1n) / BigInt(unit)
+  return minorMoneyInput(fen.toString(), 2)
 }
 
 export function formatAgentQuota(quota: number): string {

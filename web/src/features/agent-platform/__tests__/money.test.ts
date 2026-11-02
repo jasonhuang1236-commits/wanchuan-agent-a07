@@ -22,6 +22,7 @@ import { toIntlLocale } from '@/i18n/languages'
 import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import {
+  agentRepaymentAmount,
   formatMinorMoney,
   minorMoneyInput,
   parseMinorMoney,
@@ -31,6 +32,27 @@ import {
 } from '../lib/money'
 
 describe('original-currency money', () => {
+  it('keeps sub-fen debt visible and rounds only the actual payment up to fen', () => {
+    const previous = useSystemConfigStore.getState().config
+    try {
+      useSystemConfigStore.getState().setConfig({
+        currency: { ...previous.currency, quotaPerUnit: 500_000 },
+      })
+      expect(formatAgentCash(4500)).toBe('¥0.009')
+      expect(formatAgentCash(2000)).toBe('¥0.004')
+      expect(formatAgentCash(1)).toBe('¥0.000002')
+      expect(formatAgentCash(5000)).toBe('¥0.01')
+      expect(agentRepaymentAmount(1)).toBe('0.01')
+      expect(agentRepaymentAmount(4500)).toBe('0.01')
+      expect(agentRepaymentAmount(4_525_001)).toBe('9.06')
+      expect(agentRepaymentAmount(4_525_000)).toBe('9.05')
+      expect(agentRepaymentAmount(0)).toBe('')
+      expect(agentRepaymentAmount(-1)).toBe('')
+      expect(agentRepaymentAmount(Number.MAX_SAFE_INTEGER + 1)).toBe('')
+    } finally {
+      useSystemConfigStore.getState().setConfig(previous)
+    }
+  })
   it('agent face values and CNY debt ignore the wallet display exchange rate', () => {
     const previous = useSystemConfigStore.getState().config
     try {

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -56,6 +57,73 @@ func TestAgentSimpleRepaymentAcceptsExactFenWhilePaused(t *testing.T) {
 	request.RequestID = "a07-repay-no-debt"
 	_, err = CreateAgentSimpleRecharge(agent, request, "a07-repay-no-debt", "https://pay.example.test", map[string]string{})
 	require.ErrorIs(t, err, ErrAgentSimpleInvalid)
+}
+
+func TestAgentSimpleRepaymentSettlesSubFenDebtAndPreservesChange(t *testing.T) {
+	for _, viaRoot := range []bool{false, true} {
+		for _, debt := range []int64{4500, 4000, 2000, 1, 5000} {
+			t.Run(fmt.Sprintf("root_%t_debt_%d", viaRoot, debt), func(t *testing.T) {
+				root, agent := simpleAccountingFixture(t)
+				require.NoError(t, DB.Model(&AgentSimpleAccount{}).Where("agent_user_id = ?", agent.UserID).Updates(map[string]any{"status": AgentSimpleStatusPaused, "credit_limit_quota": 10_000, "credit_outstanding_quota": debt}).Error)
+				require.NoError(t, DB.Create(&AgentSimpleCreditDebt{AgentUserID: agent.UserID, CodeID: 87003, Quota: debt}).Error)
+				if viaRoot {
+					request := AgentSimpleRepaymentRequest{RequestID: "a07-tail-root", AgentUserID: agent.UserID, Quota: 5000, Reason: "Synthetic one-fen payment"}
+					for range 2 {
+						_, err := RepayAgentSimpleCredit(root, request)
+						require.NoError(t, err)
+					}
+				} else {
+					request := AgentSimpleRechargeRequest{RequestID: "a07-tail-online", Amount: "0.01", Kind: "repayment", PaymentMethod: "alipay"}
+					order, err := CreateAgentSimpleRecharge(agent, request, "a07-tail-online", "https://pay.example.test", map[string]string{})
+					require.NoError(t, err)
+					for range 2 {
+						_, err = RechargeEpay(order.TradeNo, "alipay", "0.01", "", simpleVerifiedEpayFacts(t, order.TradeNo, "0.01"))
+						require.NoError(t, err)
+					}
+				}
+				var account AgentSimpleAccount
+				require.NoError(t, DB.First(&account, agent.UserID).Error)
+				assert.Zero(t, account.CreditOutstandingQuota)
+				assert.EqualValues(t, (5000-debt)*10/9, account.CashQuota, "the discounted face value of change is credited exactly once")
+				assert.Equal(t, AgentSimpleStatusPaused, account.Status)
+				var stored AgentSimpleCreditDebt
+				require.NoError(t, DB.Where("agent_user_id = ?", agent.UserID).First(&stored).Error)
+				assert.Equal(t, debt, stored.PaidQuota)
+				var ledger AgentSimpleLedger
+				require.NoError(t, DB.Where("agent_user_id = ?", agent.UserID).Order("id DESC").First(&ledger).Error)
+				assert.Equal(t, -debt, ledger.DeltaCreditOutstanding)
+				assert.Equal(t, account.CashQuota, ledger.DeltaCashQuota)
+			})
+		}
+	}
+}
+
+func TestAgentSimpleRepaymentCannotExceedRoundedDebtOrCreateValueWithoutDebt(t *testing.T) {
+	root, agent := simpleAccountingFixture(t)
+	request := AgentSimpleRepaymentRequest{RequestID: "a07-no-debt-cash", AgentUserID: agent.UserID, Quota: 5000, Reason: "Synthetic denied payment"}
+	_, err := RepayAgentSimpleCredit(root, request)
+	require.ErrorIs(t, err, ErrAgentSimpleInvalid)
+	require.NoError(t, DB.Model(&AgentSimpleAccount{}).Where("agent_user_id = ?", agent.UserID).Updates(map[string]any{"credit_limit_quota": 10_000, "credit_outstanding_quota": 4500}).Error)
+	require.NoError(t, DB.Create(&AgentSimpleCreditDebt{AgentUserID: agent.UserID, CodeID: 87004, Quota: 4500}).Error)
+	request.Quota = 5001
+	_, err = RepayAgentSimpleCredit(root, request)
+	require.ErrorIs(t, err, ErrAgentSimpleInvalid)
+	_, err = CreateAgentSimpleRecharge(agent, AgentSimpleRechargeRequest{RequestID: "a07-over-tail-limit", Amount: "0.02", Kind: "repayment", PaymentMethod: "alipay"}, "a07-over-tail-limit", "https://pay.example.test", map[string]string{})
+	require.ErrorIs(t, err, ErrAgentSimpleInvalid)
+	var account AgentSimpleAccount
+	require.NoError(t, DB.First(&account, agent.UserID).Error)
+	assert.EqualValues(t, 4500, account.CreditOutstandingQuota)
+	assert.Zero(t, account.CashQuota)
+	require.NoError(t, DB.Model(&AgentSimpleAccount{}).Where("agent_user_id = ?", agent.UserID).Update("cash_quota", common.MaxWalletQuota).Error)
+	request.Quota = 5000
+	_, err = RepayAgentSimpleCredit(root, request)
+	require.ErrorIs(t, err, ErrWalletQuotaLimitExceeded)
+	require.NoError(t, DB.First(&account, agent.UserID).Error)
+	assert.EqualValues(t, 4500, account.CreditOutstandingQuota, "a rejected change credit must roll back the repayment")
+	assert.EqualValues(t, common.MaxWalletQuota, account.CashQuota)
+	var stored AgentSimpleCreditDebt
+	require.NoError(t, DB.Where("agent_user_id = ?", agent.UserID).First(&stored).Error)
+	assert.Zero(t, stored.PaidQuota)
 }
 
 func TestAgentSimpleRepaymentPreservesOverpaymentAfterAnotherRepayment(t *testing.T) {

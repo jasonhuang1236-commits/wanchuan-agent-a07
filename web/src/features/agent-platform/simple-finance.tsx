@@ -35,6 +35,7 @@ import { SimplePaymentFeeForm } from './components/simple-payment-fee-form'
 import { SimpleRecordPager } from './components/simple-record-pager'
 import { SimpleRecords } from './components/simple-records'
 import {
+  agentRepaymentAmount,
   formatAgentCash,
   formatAgentQuota as formatQuota,
   parseAgentQuota,
@@ -80,6 +81,8 @@ const actionFields: Record<string, ActionField[]> = {
       name: 'quota',
       label: 'Repayment amount (CNY)',
       kind: 'text',
+      description:
+        'Repay the debt in CNY, rounded up to the nearest fen. Any change is added to your agent balance.',
       validate: (value) =>
         (parseAgentQuota(String(value)) ?? 0) > 0
           ? undefined
@@ -499,7 +502,8 @@ function RootStatusForm(props: {
 }
 
 function RootActionForm(props: {
-  agent: Pick<SimpleAgentRow, 'agent_user_id'>
+  agent: Pick<SimpleAgentRow, 'agent_user_id'> &
+    Partial<Pick<SimpleAgentRow, 'amount_due_quota'>>
   action: string
   selectUser?: boolean
   onClose: () => void
@@ -507,6 +511,13 @@ function RootActionForm(props: {
 }) {
   const { t } = useTranslation()
   const requestId = useRequestId()
+  const initial: Record<string, string> = {}
+  if (props.action === 'exit') {
+    initial.source = 'cash'
+    initial.target = 'wallet'
+  } else if (props.action === 'repay') {
+    initial.quota = agentRepaymentAmount(props.agent.amount_due_quota ?? 0)
+  }
   const fields = [
     ...(props.selectUser
       ? [
@@ -530,11 +541,7 @@ function RootActionForm(props: {
     <ActionForm
       title={t('Record agent finance action')}
       fields={fields}
-      initial={
-        props.action === 'exit'
-          ? { source: 'cash', target: 'wallet' }
-          : undefined
-      }
+      initial={initial}
       onClose={props.onClose}
       onSubmit={async (values) => {
         const id = requestId(values)

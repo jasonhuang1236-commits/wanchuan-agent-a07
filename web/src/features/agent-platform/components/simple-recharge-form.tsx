@@ -20,11 +20,10 @@ import { useTranslation } from 'react-i18next'
 import { Dialog } from '@/components/dialog'
 import { ErrorState } from '@/components/error-state'
 import { LoadingState } from '@/components/loading-state'
-import { getCurrencyDisplay } from '@/lib/currency'
 import { submitPaymentForm } from '@/lib/payment-form'
 
 import { useRequestId } from '../hooks/use-request-id'
-import { parseMinorMoney } from '../lib/money'
+import { agentRepaymentAmount, parseMinorMoney } from '../lib/money'
 import { getSimplePaymentMethods, requestSimpleRecharge } from '../simple-api'
 import { ActionForm, type ActionField } from './action-form'
 
@@ -80,7 +79,7 @@ export function SimpleRechargeForm(props: {
       },
       description:
         kind === 'repayment'
-          ? 'Pay the actual amount due in CNY. Any concurrent overpayment is preserved in your agent balance.'
+          ? 'Repay the debt in CNY, rounded up to the nearest fen. Any change is added to your agent balance.'
           : 'Pay 90% of the face value. Existing debt is repaid first; the remaining payment funds agent balance.',
     },
     {
@@ -122,9 +121,7 @@ export function SimpleRechargeForm(props: {
         payment_method: methods[0].type,
         amount:
           kind === 'repayment' && props.amountDue
-            ? (
-                props.amountDue / getCurrencyDisplay().config.quotaPerUnit
-              ).toFixed(2)
+            ? agentRepaymentAmount(props.amountDue)
             : '',
       }}
       onClose={props.onClose}
