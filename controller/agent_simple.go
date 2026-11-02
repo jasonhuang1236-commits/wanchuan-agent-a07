@@ -24,7 +24,7 @@ func writeAgentSimpleError(c *gin.Context, err error) {
 		common.ApiErrorStatus(c, http.StatusForbidden, common.NewMessage(err.Error()))
 	case errors.Is(err, model.ErrAgentSimpleUnavailable):
 		common.ApiErrorStatus(c, http.StatusForbidden, common.NewMessage(err.Error()))
-	case errors.Is(err, model.ErrAgentSimpleInsufficient), errors.Is(err, model.ErrAgentSimpleConflict), errors.Is(err, model.ErrAgentSimpleState), errors.Is(err, model.ErrAgentSimpleInvariant):
+	case errors.Is(err, model.ErrAgentSimpleInsufficient), errors.Is(err, model.ErrAgentSimpleConflict), errors.Is(err, model.ErrAgentQuotaConflict), errors.Is(err, model.ErrAgentPaymentReceiptConflict), errors.Is(err, model.ErrAgentSimpleState), errors.Is(err, model.ErrAgentSimpleInvariant):
 		common.ApiErrorStatus(c, http.StatusConflict, common.NewMessage(err.Error()))
 	case errors.Is(err, model.ErrAgentSimpleInvalid):
 		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage(err.Error()))
@@ -224,6 +224,10 @@ func QuoteAgentSimplePayment(c *gin.Context) {
 		return
 	}
 	quote, err := model.QuoteAgentSimplePayment(request.PaymentMethod, request.Quota, request.SalePriceFen)
+	if errors.Is(err, model.ErrAgentSimpleInvalid) && quote != nil && quote.MinimumSalePriceFen > 0 {
+		common.ApiSuccess(c, quote)
+		return
+	}
 	if err != nil {
 		writeAgentSimpleError(c, err)
 		return

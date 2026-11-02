@@ -28,6 +28,7 @@ import {
 import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { Dialog } from '@/components/dialog'
 import { EmptyState } from '@/components/empty-state'
 import { ErrorState } from '@/components/error-state'
 import { SectionPageLayout } from '@/components/layout'
@@ -41,20 +42,23 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { extensionWalletPage } from '@/extensions'
-import { getRedemptions } from '@/features/redemption-codes/api'
 import { REDEMPTION_STATUSES } from '@/features/redemption-codes/constants'
 import { isRedemptionExpired } from '@/features/redemption-codes/lib'
-import type { Redemption } from '@/features/redemption-codes/types'
 import { formatTimestampToDate } from '@/lib/format'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { getPlatform } from './api'
 import { SimpleCodeForm } from './components/simple-code-form'
+import { SimpleHistory } from './components/simple-history'
 import { SimpleIncomeTransferForm } from './components/simple-income-transfer-form'
 import { SimplePaymentForm } from './components/simple-payment-form'
 import { SimpleRechargeForm } from './components/simple-recharge-form'
 import { formatAgentCash, formatAgentQuota as formatQuota } from './lib/money'
-import { getSimpleAgentBalance } from './simple-api'
+import {
+  getSimpleAgentBalance,
+  getSimpleAgentCodes,
+  type SimpleCodeRecord,
+} from './simple-api'
 import type { PlatformSelf } from './types'
 
 export function AgentPortal() {
@@ -74,13 +78,11 @@ export function AgentPortal() {
   const recent = useQuery({
     queryKey: ['agent-platform', userId, 'recent-redemptions'],
     queryFn: async () => {
-      const response = await getRedemptions({
+      return getSimpleAgentCodes({
         p: 1,
         page_size: 5,
         agent_user_id: userId,
       })
-      if (!response.success) throw new Error('Redemption records unavailable')
-      return response.data
     },
     enabled: !!userId,
   })
@@ -90,6 +92,7 @@ export function AgentPortal() {
   const [repaymentOpen, setRepaymentOpen] = useState(false)
   const [incomeTransferOpen, setIncomeTransferOpen] = useState(false)
   const [simplePaymentOpen, setSimplePaymentOpen] = useState(false)
+  const [billsOpen, setBillsOpen] = useState(false)
 
   if (self.isPending || balance.isPending) {
     return <LoadingState />
@@ -247,6 +250,16 @@ export function AgentPortal() {
                       )}
                     </p>
                   )}
+                  {account.amount_due_quota > 0 && (
+                    <Button
+                      size='sm'
+                      variant='outline'
+                      className='border-white/25 bg-transparent text-white hover:bg-white/10'
+                      onClick={() => setBillsOpen(true)}
+                    >
+                      {t('Bills and reminders')}
+                    </Button>
+                  )}
                   <p className='text-xs text-sky-100/70'>
                     {t(
                       'Direct codes use agent balance or credit. Customer payment codes do not use agent balance; their profit is frozen for five days.'
@@ -343,6 +356,15 @@ export function AgentPortal() {
       {simplePaymentOpen && (
         <SimplePaymentForm onClose={() => setSimplePaymentOpen(false)} />
       )}
+      {billsOpen && (
+        <Dialog
+          open
+          title={t('Bills and reminders')}
+          onOpenChange={setBillsOpen}
+        >
+          <SimpleHistory agentUserId={userId} initialKind='bills' />
+        </Dialog>
+      )}
     </>
   )
 }
@@ -368,9 +390,9 @@ function Metric(props: {
   )
 }
 
-function RecentRedemption(props: { row: Redemption }) {
+function RecentRedemption(props: { row: SimpleCodeRecord }) {
   const { t } = useTranslation()
-  const status = isRedemptionExpired(props.row.expired_time, props.row.status)
+  const status = isRedemptionExpired(props.row.expired_at, props.row.status)
     ? t('Expired')
     : t(REDEMPTION_STATUSES[props.row.status]?.labelKey ?? 'Unknown')
   return (
@@ -378,7 +400,10 @@ function RecentRedemption(props: { row: Redemption }) {
       <div>
         <p className='truncate font-medium'>{props.row.name}</p>
         <p className='text-muted-foreground text-xs'>
-          {formatTimestampToDate(props.row.created_time)}
+          {formatTimestampToDate(props.row.created_at)} ·{' '}
+          {props.row.mode === 'payment'
+            ? t('Customer payment')
+            : t('Direct issue')}
         </p>
       </div>
       <div className='text-right'>

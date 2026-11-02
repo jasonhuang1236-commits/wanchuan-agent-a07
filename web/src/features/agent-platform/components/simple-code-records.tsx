@@ -40,6 +40,7 @@ import {
   type SimpleCodeRecord,
 } from '../simple-api'
 import { ActionForm } from './action-form'
+import { SimpleRecordPager } from './simple-record-pager'
 
 function isExpired(row: SimpleCodeRecord) {
   return (
@@ -47,10 +48,15 @@ function isExpired(row: SimpleCodeRecord) {
   )
 }
 
-export function SimpleCodeRecords(props: { agentUserId?: number }) {
+export function SimpleCodeRecords(props: {
+  agentUserId?: number
+  mode?: 'all' | 'direct' | 'payment'
+  hideFilter?: boolean
+}) {
   const { t } = useTranslation()
   const client = useQueryClient()
-  const [mode, setMode] = useState<'all' | 'direct' | 'payment'>('all')
+  const [selectedMode, setMode] = useState<'all' | 'direct' | 'payment'>('all')
+  const mode = props.mode ?? selectedMode
   const [page, setPage] = useState(1)
   const query = useQuery({
     queryKey: ['agent-platform', 'simple-codes', props.agentUserId, mode, page],
@@ -62,12 +68,18 @@ export function SimpleCodeRecords(props: { agentUserId?: number }) {
         page_size: 20,
       }),
   })
-
   if (query.isPending) return <LoadingState />
-  if (query.isError) return <ErrorState onRetry={() => void query.refetch()} />
-  if (!query.data?.items.length) {
-    return (
-      <div className='space-y-3'>
+  if (query.isError)
+    {return (
+      <ErrorState
+        onRetry={() => {
+          void query.refetch()
+        }}
+      />
+    )}
+  return (
+    <div className='space-y-3'>
+      {!props.hideFilter && (
         <ModeFilter
           mode={mode}
           onChange={(value) => {
@@ -75,63 +87,30 @@ export function SimpleCodeRecords(props: { agentUserId?: number }) {
             setPage(1)
           }}
         />
+      )}
+      {query.data.items.length ? (
+        <div className='divide-border overflow-hidden rounded-lg border'>
+          {query.data.items.map((row) => (
+            <SimpleCodeRecordRow
+              key={row.id}
+              row={row}
+              onChanged={() => {
+                void client.invalidateQueries({ queryKey: ['agent-platform'] })
+              }}
+            />
+          ))}
+        </div>
+      ) : (
         <EmptyState
           title={t('No redemption codes found')}
           description={t('Issued direct and credit codes will appear here.')}
         />
-      </div>
-    )
-  }
-
-  return (
-    <div className='space-y-3'>
-      <ModeFilter
-        mode={mode}
-        onChange={(value) => {
-          setMode(value)
-          setPage(1)
-        }}
+      )}
+      <SimpleRecordPager
+        page={page}
+        total={query.data.total}
+        onChange={setPage}
       />
-      <div className='divide-border overflow-hidden rounded-lg border'>
-        {query.data.items.map((row) => (
-          <SimpleCodeRecordRow
-            key={row.id}
-            row={row}
-            onChanged={() => {
-              void client.invalidateQueries({
-                queryKey: ['agent-platform', 'simple-codes'],
-              })
-              void client.invalidateQueries({ queryKey: ['agent-platform'] })
-            }}
-          />
-        ))}
-      </div>
-      <div className='flex items-center justify-between gap-2 text-sm'>
-        <span className='text-muted-foreground'>
-          {t('Page {{page}} of {{pages}}', {
-            page,
-            pages: Math.max(1, Math.ceil(query.data.total / 20)),
-          })}
-        </span>
-        <div className='flex gap-2'>
-          <Button
-            size='sm'
-            variant='outline'
-            disabled={page <= 1}
-            onClick={() => setPage((value) => Math.max(1, value - 1))}
-          >
-            {t('Previous')}
-          </Button>
-          <Button
-            size='sm'
-            variant='outline'
-            disabled={page >= Math.ceil(query.data.total / 20)}
-            onClick={() => setPage((value) => value + 1)}
-          >
-            {t('Next')}
-          </Button>
-        </div>
-      </div>
     </div>
   )
 }
@@ -220,7 +199,9 @@ function SimpleCodeRecordRow(props: {
             {formatQuota(props.row.quota)}
           </div>
           <div className='text-muted-foreground text-xs'>
-            {props.row.mode === 'credit' ? t('Credit') : t('Direct')}
+            {props.row.mode === 'payment'
+              ? t('Customer payment')
+              : t('Direct issue')}
           </div>
         </div>
         <StatusBadge

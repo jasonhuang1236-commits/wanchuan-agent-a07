@@ -34,15 +34,17 @@ import {
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  formatAgentCash,
+  formatAgentQuota as formatQuota,
+} from '@/features/agent-platform/lib/money'
 import { isAgentWorkspaceUser } from '@/lib/agent-permissions'
-import { formatQuota } from '@/lib/format'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { SimpleCodeForm } from '../agent-platform/components/simple-code-form'
-import { SimpleCodeRecords } from '../agent-platform/components/simple-code-records'
 import { SimplePaymentForm } from '../agent-platform/components/simple-payment-form'
-import { SimplePaymentRecords } from '../agent-platform/components/simple-payment-records'
+import { SimpleRecords } from '../agent-platform/components/simple-records'
 import { getSimpleAgentBalance } from '../agent-platform/simple-api'
 import { RedemptionsDialogs } from './components/redemptions-dialogs'
 import { RedemptionsPrimaryButtons } from './components/redemptions-primary-buttons'
@@ -87,13 +89,13 @@ export function Redemptions() {
               <div>
                 <dt>{t('Available credit')}</dt>
                 <dd className='text-foreground font-medium'>
-                  {formatQuota(balance.data.available_credit_quota)}
+                  {formatAgentCash(balance.data.available_credit_quota)}
                 </dd>
               </div>
               <div>
                 <dt>{t('Amount due')}</dt>
                 <dd className='text-foreground font-medium'>
-                  {formatQuota(balance.data.amount_due_quota)}
+                  {formatAgentCash(balance.data.amount_due_quota)}
                 </dd>
               </div>
             </dl>
@@ -178,11 +180,6 @@ export function Redemptions() {
               </div>
             ) : (
               <div className='min-h-0 flex-1 space-y-4 overflow-y-auto'>
-                {(isAgent || isRoot) && (
-                  <div className='rounded-lg border p-4'>
-                    <SimplePaymentRecords agentUserId={agentId} />
-                  </div>
-                )}
                 {isRoot && (
                   <div className='rounded-lg border p-4'>
                     <div className='mb-3 max-w-xs space-y-1'>
@@ -211,15 +208,22 @@ export function Redemptions() {
                         }}
                       />
                     </div>
-                    <SimpleCodeRecords agentUserId={agentId} />
+                    <SimpleRecords key={agentId} agentUserId={agentId} />
                   </div>
                 )}
-                {isAgent ? (
+                {isAgent && (
                   <div className='rounded-lg border p-4'>
-                    <SimpleCodeRecords agentUserId={agentId} />
+                    <SimpleRecords key={agentId} agentUserId={agentId} />
                   </div>
-                ) : (
-                  <RedemptionsTable />
+                )}
+                {!isAgent && !isRoot && <RedemptionsTable />}
+                {isRoot && (
+                  <div className='min-h-[400px] space-y-3 rounded-lg border p-4'>
+                    <h2 className='font-semibold'>
+                      {t('Platform redemption codes')}
+                    </h2>
+                    <RedemptionsTable />
+                  </div>
                 )}
               </div>
             )}

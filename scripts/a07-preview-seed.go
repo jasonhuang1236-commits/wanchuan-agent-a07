@@ -82,10 +82,19 @@ func main() {
 				return err
 			}
 		}
+		for _, option := range []model.Option{{Key: "ServerAddress", Value: "http://127.0.0.1:3107"}, {Key: "PayAddress", Value: "https://payment.example.test"}, {Key: "EpayId", Value: "preview-merchant"}, {Key: "EpayKey", Value: "preview-test-key"}, {Key: "PayMethods", Value: `[{"type":"alipay","name":"支付宝"}]`}, {Key: "payment_setting.compliance_confirmed", Value: "true"}, {Key: "payment_setting.compliance_terms_version", Value: "v1"}} {
+			if err := tx.Where("key = ?", option.Key).Assign(map[string]any{"value": option.Value}).FirstOrCreate(&option).Error; err != nil {
+				return err
+			}
+		}
+		fee := model.AgentSimplePaymentFee{PaymentMethod: "alipay", FeeBPS: 100, Enabled: true, Version: 1, UpdatedBy: 87001, UpdatedAt: time.Now().Unix()}
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&fee).Error; err != nil {
+			return err
+		}
 		return nil
 	})
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("Synthetic A07 preview users ready; no payment provider configured.")
+	fmt.Println("Synthetic A07 preview ready; payment.example.test is a non-paying fixture.")
 }

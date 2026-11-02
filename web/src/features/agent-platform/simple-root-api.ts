@@ -19,6 +19,11 @@ For commercial licensing, please contact support@quantumnous.com
 import { getPlatform, postPlatform } from './api'
 
 export interface SimpleAgentRow {
+  cash_quota: number
+  reward_quota: number
+  root_quota: number
+  payment_quota: number
+  credit_limit_quota: number
   agent_user_id: number
   username: string
   status: string
@@ -47,7 +52,17 @@ export function getSimpleHistory(
   kind: string,
   params?: { agent_user_id?: number; p?: number; page_size?: number }
 ) {
-  return getPlatform(`/simple/finance/history/${kind}`, params)
+  return getPlatform<SimpleHistoryPage>(
+    `/simple/finance/history/${kind}`,
+    params
+  )
+}
+
+export interface SimpleHistoryPage {
+  items: Record<string, string | number | boolean>[]
+  total: number
+  page: number
+  page_size: number
 }
 
 export function updateSimpleStatus(payload: {

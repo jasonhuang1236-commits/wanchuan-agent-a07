@@ -172,7 +172,7 @@ func PrepareAgentLegacyRedemptionOperation(identity AuthSessionIdentity, action,
 				query = query.Where("budget_agent_id = ?", request.AgentUserID)
 			}
 			if request.InvalidOnly {
-				query = query.Where("customer_user_id = 0 AND delivery_id = 0 AND source_protected = false").Where("(status IN ? OR (status = ? AND expired_time != 0 AND expired_time < ?))", []int{common.RedemptionCodeStatusUsed, common.RedemptionCodeStatusDisabled}, common.RedemptionCodeStatusEnabled, common.GetTimestamp()).Limit(MaxRedemptionDeleteBatchSize)
+				query = query.Where("(agent_simple_mode IS NULL OR agent_simple_mode = '') AND customer_user_id = 0 AND delivery_id = 0 AND source_protected = false").Where("(status IN ? OR (status = ? AND expired_time != 0 AND expired_time < ?))", []int{common.RedemptionCodeStatusUsed, common.RedemptionCodeStatusDisabled}, common.RedemptionCodeStatusEnabled, common.GetTimestamp()).Limit(MaxRedemptionDeleteBatchSize)
 			} else {
 				if len(request.IDs) == 0 || len(request.IDs) > MaxRedemptionDeleteBatchSize {
 					return ErrRedemptionInvalidRequest

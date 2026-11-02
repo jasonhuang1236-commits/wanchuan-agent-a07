@@ -53,7 +53,7 @@ func GetRedemptionsScoped(scope RedemptionScope, agentID int, keyword, status st
 	if !scope.valid() {
 		return nil, 0, ErrAgentRedemptionPermission
 	}
-	query := scope.query(DB.Model(&Redemption{}))
+	query := scope.query(DB.Model(&Redemption{})).Where("agent_simple_mode IS NULL OR agent_simple_mode = ?", "")
 	if scope.IsAdmin() && agentID > 0 {
 		query = query.Where("budget_agent_id = ?", agentID)
 	}
@@ -94,7 +94,7 @@ func GetRedemptionScoped(scope RedemptionScope, id int) (*Redemption, error) {
 		return nil, ErrRedemptionInvalidRequest
 	}
 	var redemption Redemption
-	err := scope.query(DB).Where("id = ?", id).First(&redemption).Error
+	err := scope.query(DB).Where("id = ?", id).Where("agent_simple_mode IS NULL OR agent_simple_mode = ?", "").First(&redemption).Error
 	return &redemption, err
 }
 
@@ -452,7 +452,7 @@ func DeleteRedemptionsScoped(scope RedemptionScope, ids []int, invalidOnly bool,
 			query = query.Where("budget_agent_id = ?", agentFilter[0])
 		}
 		if invalidOnly {
-			query = query.Where("agent_simple_mode = '' AND customer_user_id = 0 AND delivery_id = 0 AND source_protected = false").Where("(status IN ? OR (status = ? AND expired_time != 0 AND expired_time < ?))", []int{common.RedemptionCodeStatusUsed, common.RedemptionCodeStatusDisabled}, common.RedemptionCodeStatusEnabled, common.GetTimestamp()).Limit(MaxRedemptionDeleteBatchSize)
+			query = query.Where("(agent_simple_mode IS NULL OR agent_simple_mode = '') AND customer_user_id = 0 AND delivery_id = 0 AND source_protected = false").Where("(status IN ? OR (status = ? AND expired_time != 0 AND expired_time < ?))", []int{common.RedemptionCodeStatusUsed, common.RedemptionCodeStatusDisabled}, common.RedemptionCodeStatusEnabled, common.GetTimestamp()).Limit(MaxRedemptionDeleteBatchSize)
 		} else {
 			query = query.Where("id IN ?", ids)
 		}

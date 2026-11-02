@@ -86,6 +86,8 @@ type AgentSimpleAccount struct {
 }
 
 type AgentSimpleLedger struct {
+	DeltaCreditLimit        int64  `json:"delta_credit_limit" gorm:"type:bigint;not null;default:0"`
+	CreditLimitAfter        int64  `json:"credit_limit_after" gorm:"type:bigint;not null;default:0"`
 	ID                      int64  `json:"id" gorm:"primaryKey"`
 	EventKey                string `json:"-" gorm:"type:varchar(160);not null;uniqueIndex"`
 	AgentUserID             int    `json:"agent_user_id" gorm:"not null;index"`
@@ -145,6 +147,8 @@ func (*AgentSimpleCodeAllocation) BeforeDelete(*gorm.DB) error { return ErrAgent
 // normal redemption code only after the payment callback is verified; before
 // then it consumes neither agent balance nor credit.
 type AgentSimplePaymentOrder struct {
+	RefundEvidence   string `json:"-" gorm:"type:varchar(255);not null;default:''"`
+	RefundedBy       int    `json:"-" gorm:"not null;default:0"`
 	ID               int64  `json:"id" gorm:"primaryKey"`
 	RequestKey       string `json:"-" gorm:"type:varchar(128);not null;uniqueIndex"`
 	PublicID         string `json:"public_id" gorm:"type:varchar(36);not null;uniqueIndex"`
@@ -214,6 +218,7 @@ type AgentSimpleCodeRequest struct {
 }
 
 type AgentSimplePaymentRequest struct {
+	FeeVersion    int64  `json:"fee_version,omitempty"`
 	RequestID     string `json:"request_id"`
 	Name          string `json:"name"`
 	Quota         int64  `json:"quota"`
@@ -352,26 +357,35 @@ type AgentSimpleSummary struct {
 }
 
 type AgentSimplePaymentOrderView struct {
-	ID            int64  `json:"id"`
-	AgentUserID   int    `json:"agent_user_id"`
-	PublicID      string `json:"public_id"`
-	Name          string `json:"name"`
-	Quota         int64  `json:"quota"`
-	SalePriceFen  int64  `json:"sale_price_fen"`
-	CostPriceFen  int64  `json:"cost_price_fen"`
-	FeeFen        int64  `json:"fee_fen"`
-	ProfitQuota   int64  `json:"profit_quota"`
-	Status        string `json:"status"`
-	CustomerURL   string `json:"customer_url,omitempty"`
-	ExpiresAt     int64  `json:"expires_at"`
-	PaidAt        int64  `json:"paid_at"`
-	DeliveredAt   int64  `json:"delivered_at"`
-	RedemptionID  int    `json:"redemption_id"`
-	CreatedAt     int64  `json:"created_at"`
-	RedemptionKey string `json:"redemption_key,omitempty"`
-	TradeNo       string `json:"-"`
-	PaymentURL    string `json:"-"`
-	PaymentParams string `json:"-"`
+	RefundReason        string `json:"refund_reason,omitempty"`
+	RefundEvidence      string `json:"refund_evidence,omitempty"`
+	RefundedBy          int    `json:"refunded_by,omitempty"`
+	RefundedAt          int64  `json:"refunded_at"`
+	MinimumSalePriceFen int64  `json:"minimum_sale_price_fen"`
+	FeeVersion          int64  `json:"fee_version"`
+	PriceValid          bool   `json:"price_valid"`
+	MaturesAt           int64  `json:"matures_at"`
+	ProfitMatured       bool   `json:"profit_matured"`
+	ID                  int64  `json:"id"`
+	AgentUserID         int    `json:"agent_user_id"`
+	PublicID            string `json:"public_id"`
+	Name                string `json:"name"`
+	Quota               int64  `json:"quota"`
+	SalePriceFen        int64  `json:"sale_price_fen"`
+	CostPriceFen        int64  `json:"cost_price_fen"`
+	FeeFen              int64  `json:"fee_fen"`
+	ProfitQuota         int64  `json:"profit_quota"`
+	Status              string `json:"status"`
+	CustomerURL         string `json:"customer_url,omitempty"`
+	ExpiresAt           int64  `json:"expires_at"`
+	PaidAt              int64  `json:"paid_at"`
+	DeliveredAt         int64  `json:"delivered_at"`
+	RedemptionID        int    `json:"redemption_id"`
+	CreatedAt           int64  `json:"created_at"`
+	RedemptionKey       string `json:"redemption_key,omitempty"`
+	TradeNo             string `json:"-"`
+	PaymentURL          string `json:"-"`
+	PaymentParams       string `json:"-"`
 }
 
 type AgentSimplePublicPaymentView struct {
@@ -587,29 +601,37 @@ func QuoteAgentSimplePayment(paymentMethod string, quota, salePriceFen int64) (*
 	if validateAgentSimpleAmount(quota) != nil || salePriceFen <= 0 || salePriceFen > int64(common.MaxWalletQuota) {
 		return nil, ErrAgentSimpleInvalid
 	}
-	var result AgentSimplePaymentOrderView
+	var result *AgentSimplePaymentOrderView
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		fee, err := lockAgentSimplePaymentFeeTx(tx, paymentMethod)
 		if err != nil {
 			return err
 		}
-		costFen, err := agentSimpleCostPriceFen(quota)
-		if err != nil {
-			return err
-		}
-		feeFen := decimal.NewFromInt(salePriceFen).Mul(decimal.NewFromInt(int64(fee.FeeBPS))).Div(decimal.NewFromInt(10_000)).Ceil().IntPart()
-		profitFen := salePriceFen - costFen - feeFen
-		if profitFen < 0 {
-			return ErrAgentSimpleInvalid
-		}
-		profitQuota, err := agentSimplePaymentProfitQuota(profitFen)
-		if err != nil {
-			return err
-		}
-		result = AgentSimplePaymentOrderView{Quota: quota, SalePriceFen: salePriceFen, CostPriceFen: costFen, FeeFen: feeFen, ProfitQuota: profitQuota}
-		return nil
+		result, err = agentSimplePaymentQuote(fee, quota, salePriceFen)
+		return err
 	})
-	return &result, err
+	return result, err
+}
+
+func agentSimplePaymentQuote(fee *AgentSimplePaymentFee, quota, salePriceFen int64) (*AgentSimplePaymentOrderView, error) {
+	if fee.FeeBPS >= 10_000 || fee.FeeBPS < 0 {
+		return nil, ErrAgentSimpleUnavailable
+	}
+	costFen, err := agentSimpleCostPriceFen(quota)
+	if err != nil {
+		return nil, err
+	}
+	minimum := decimal.NewFromInt(costFen).Mul(decimal.NewFromInt(10_000)).Div(decimal.NewFromInt(int64(10_000 - fee.FeeBPS))).Ceil()
+	if minimum.GreaterThan(decimal.NewFromInt(common.MaxWalletQuota)) {
+		return nil, ErrAgentSimpleInvalid
+	}
+	feeFen := decimal.NewFromInt(salePriceFen).Mul(decimal.NewFromInt(int64(fee.FeeBPS))).Div(decimal.NewFromInt(10_000)).Ceil().IntPart()
+	quote := &AgentSimplePaymentOrderView{Quota: quota, SalePriceFen: salePriceFen, CostPriceFen: costFen, FeeFen: feeFen, MinimumSalePriceFen: minimum.IntPart(), FeeVersion: fee.Version, PriceValid: salePriceFen >= minimum.IntPart()}
+	if !quote.PriceValid {
+		return quote, ErrAgentSimpleInvalid
+	}
+	quote.ProfitQuota, err = agentSimplePaymentProfitQuota(salePriceFen - costFen - feeFen)
+	return quote, err
 }
 
 func ListAgentSimplePaymentFees(identity AuthSessionIdentity) ([]AgentSimplePaymentFee, error) {
@@ -761,7 +783,7 @@ func lockAgentSimplePaymentFeeTxIncludingDisabled(tx *gorm.DB, paymentMethod str
 }
 
 func simplePaymentOrderView(order *AgentSimplePaymentOrder, customerURL string) *AgentSimplePaymentOrderView {
-	return &AgentSimplePaymentOrderView{ID: order.ID, AgentUserID: order.AgentUserID, PublicID: order.PublicID, Name: order.Name, Quota: order.Quota, SalePriceFen: order.SalePriceFen, CostPriceFen: order.CostPriceFen, FeeFen: order.FeeFen, ProfitQuota: order.ProfitQuota, Status: order.Status, CustomerURL: customerURL, ExpiresAt: order.ExpiresAt, PaidAt: order.PaidAt, DeliveredAt: order.DeliveredAt, RedemptionID: order.RedemptionID, CreatedAt: order.CreatedAt, TradeNo: order.TradeNo, PaymentURL: order.PaymentURL, PaymentParams: order.PaymentParams}
+	return &AgentSimplePaymentOrderView{MaturesAt: order.MaturesAt, ProfitMatured: order.ProfitMatured, PriceValid: true, ID: order.ID, AgentUserID: order.AgentUserID, PublicID: order.PublicID, Name: order.Name, Quota: order.Quota, SalePriceFen: order.SalePriceFen, CostPriceFen: order.CostPriceFen, FeeFen: order.FeeFen, ProfitQuota: order.ProfitQuota, Status: order.Status, CustomerURL: customerURL, ExpiresAt: order.ExpiresAt, PaidAt: order.PaidAt, DeliveredAt: order.DeliveredAt, RedemptionID: order.RedemptionID, CreatedAt: order.CreatedAt, TradeNo: order.TradeNo, PaymentURL: order.PaymentURL, PaymentParams: order.PaymentParams}
 }
 
 func GetAgentSimplePublicPayment(publicID, token string) (*AgentSimplePublicPaymentView, error) {
@@ -1012,7 +1034,7 @@ func TransferAgentSimplePaymentProfit(identity AuthSessionIdentity, request Agen
 }
 
 func RefundAgentSimplePayment(identity AuthSessionIdentity, request AgentSimplePaymentRefundCommand) error {
-	if validateAgentSimpleRequestID(request.RequestID) != nil || request.OrderID <= 0 || strings.TrimSpace(request.Reason) == "" || strings.TrimSpace(request.Evidence) == "" {
+	if validateAgentSimpleRequestID(request.RequestID) != nil || request.OrderID <= 0 || strings.TrimSpace(request.Reason) == "" || strings.TrimSpace(request.Evidence) == "" || len(request.Reason) > 255 || len(request.Evidence) > 255 {
 		return ErrAgentSimpleInvalid
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
@@ -1066,7 +1088,7 @@ func RefundAgentSimplePayment(identity AuthSessionIdentity, request AgentSimpleP
 		if err := tx.Model(&code).Select("status", "budget_reserved", "budget_version").Updates(map[string]any{"status": common.RedemptionCodeStatusDisabled, "budget_reserved": false, "budget_version": code.BudgetVersion + 1}).Error; err != nil {
 			return err
 		}
-		if err := tx.Model(&order).Where("id = ? AND status = ?", order.ID, AgentSimplePaymentPaid).Updates(map[string]any{"status": AgentSimplePaymentRefunded, "refunded_at": common.GetTimestamp(), "refund_reason": strings.TrimSpace(request.Reason), "profit_matured": true}).Error; err != nil {
+		if err := tx.Model(&order).Where("id = ? AND status = ?", order.ID, AgentSimplePaymentPaid).Updates(map[string]any{"status": AgentSimplePaymentRefunded, "refunded_at": common.GetTimestamp(), "refund_reason": strings.TrimSpace(request.Reason), "refund_evidence": strings.TrimSpace(request.Evidence), "refunded_by": actor.Id, "profit_matured": true}).Error; err != nil {
 			return err
 		}
 		return storeAgentOperationResultTx(tx, operation, "simple_payment", int(order.ID), AgentSimplePaymentRefunded)
@@ -1113,21 +1135,18 @@ func CreateAgentSimplePaymentOrder(identity AuthSessionIdentity, request AgentSi
 			if err != nil {
 				return err
 			}
-			costFen, err := agentSimpleCostPriceFen(request.Quota)
+			if request.FeeVersion < 0 || (request.FeeVersion > 0 && request.FeeVersion != fee.Version) {
+				return ErrAgentSimpleConflict
+			}
+			quote, err := agentSimplePaymentQuote(fee, request.Quota, request.SalePriceFen)
 			if err != nil {
 				return err
-			}
-			feeFen := decimal.NewFromInt(request.SalePriceFen).Mul(decimal.NewFromInt(int64(fee.FeeBPS))).Div(decimal.NewFromInt(10_000)).Ceil().IntPart()
-			profitFen := request.SalePriceFen - costFen - feeFen
-			profitQuota, err := agentSimplePaymentProfitQuota(profitFen)
-			if err != nil {
-				return ErrAgentSimpleInvalid
 			}
 			ciphertext, err := sealAgentSimplePaymentToken(token)
 			if err != nil {
 				return err
 			}
-			order = AgentSimplePaymentOrder{RequestKey: operation.OperationKey, PublicID: publicID, TokenHash: agentSimpleTokenHash(token), TokenCipher: ciphertext, AgentUserID: identity.UserID, Name: strings.TrimSpace(request.Name), Quota: request.Quota, SalePriceFen: request.SalePriceFen, CostPriceFen: costFen, FeeFen: feeFen, ProfitQuota: profitQuota, PaymentMethod: request.PaymentMethod, PaymentProvider: PaymentProviderEpay, TradeNo: tradeNo, PaymentURL: paymentURL, PaymentParams: paymentParams, Status: AgentSimplePaymentPending, ExpiresAt: common.GetTimestamp() + 7*24*60*60}
+			order = AgentSimplePaymentOrder{RequestKey: operation.OperationKey, PublicID: publicID, TokenHash: agentSimpleTokenHash(token), TokenCipher: ciphertext, AgentUserID: identity.UserID, Name: strings.TrimSpace(request.Name), Quota: request.Quota, SalePriceFen: request.SalePriceFen, CostPriceFen: quote.CostPriceFen, FeeFen: quote.FeeFen, ProfitQuota: quote.ProfitQuota, PaymentMethod: request.PaymentMethod, PaymentProvider: PaymentProviderEpay, TradeNo: tradeNo, PaymentURL: paymentURL, PaymentParams: paymentParams, Status: AgentSimplePaymentPending, ExpiresAt: common.GetTimestamp() + 7*24*60*60}
 			if err := tx.Create(&order).Error; err != nil {
 				return err
 			}
@@ -1197,7 +1216,10 @@ func ListAgentSimplePaymentOrders(identity AuthSessionIdentity, agentID, offset,
 		if err != nil {
 			return err
 		}
-		admin = actor.Role == common.RoleAdminUser || actor.Role == common.RoleRootUser
+		if actor.Role == common.RoleAdminUser {
+			return ErrAgentSimplePermission
+		}
+		admin = actor.Role == common.RoleRootUser
 		if !admin {
 			if agentID > 0 && agentID != actor.Id {
 				return ErrAgentSimplePermission
@@ -1230,7 +1252,20 @@ func ListAgentSimplePaymentOrders(identity AuthSessionIdentity, agentID, offset,
 			}
 			customerURL = strings.TrimRight(publicBase, "/") + "/agent-pay/" + rows[i].PublicID + "#token=" + token
 		}
-		result = append(result, *simplePaymentOrderView(&rows[i], customerURL))
+		view := simplePaymentOrderView(&rows[i], customerURL)
+		view.RefundedAt = rows[i].RefundedAt
+		if admin {
+			view.RefundReason, view.RefundEvidence, view.RefundedBy = rows[i].RefundReason, rows[i].RefundEvidence, rows[i].RefundedBy
+		}
+		if !admin && rows[i].Status == AgentSimplePaymentPaid && rows[i].RedemptionID > 0 {
+			var code Redemption
+			if err := DB.Select("key").Where("id = ? AND budget_agent_id = ? AND status = ? AND used_user_id = 0", rows[i].RedemptionID, rows[i].AgentUserID, common.RedemptionCodeStatusEnabled).First(&code).Error; err == nil {
+				view.RedemptionKey = code.Key
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, 0, err
+			}
+		}
+		result = append(result, *view)
 	}
 	return result, total, nil
 }
@@ -1431,7 +1466,7 @@ func saveAgentSimpleAccountTx(tx *gorm.DB, before AgentSimpleAccount, after *Age
 	if result.RowsAffected != 1 {
 		return ErrAgentSimpleConflict
 	}
-	event := AgentSimpleLedger{EventKey: fmt.Sprintf("simple:%d:%s:%s:%d", after.AgentUserID, kind, referenceID, after.Version), AgentUserID: after.AgentUserID, ActorUserID: actorID, Kind: kind, ReferenceType: referenceType, ReferenceID: referenceID, RequestID: requestID, Reason: reason, DeltaCashQuota: after.CashQuota - before.CashQuota, DeltaRewardQuota: after.RewardQuota - before.RewardQuota, DeltaRootQuota: after.RootQuota - before.RootQuota, DeltaCreditReserved: after.CreditReservedQuota - before.CreditReservedQuota, DeltaCreditOutstanding: after.CreditOutstandingQuota - before.CreditOutstandingQuota, DeltaPaymentPending: after.PaymentPendingQuota - before.PaymentPendingQuota, DeltaPaymentAvailable: after.PaymentAvailableQuota - before.PaymentAvailableQuota, DeltaPaymentTotal: after.PaymentTotalQuota - before.PaymentTotalQuota, DeltaPaymentDebt: after.PaymentDebtQuota - before.PaymentDebtQuota, DeltaPaymentQuota: after.PaymentQuota - before.PaymentQuota, DeltaPaymentReversed: after.PaymentReversedQuota - before.PaymentReversedQuota, DeltaPaymentWithdrawn: after.PaymentWithdrawnQuota - before.PaymentWithdrawnQuota, DeltaPaymentTransferred: after.PaymentTransferredQuota - before.PaymentTransferredQuota, DeltaPaymentOffset: after.PaymentOffsetQuota - before.PaymentOffsetQuota, CashAfter: after.CashQuota, RewardAfter: after.RewardQuota, RootAfter: after.RootQuota, CreditReservedAfter: after.CreditReservedQuota, CreditOutstandingAfter: after.CreditOutstandingQuota, PaymentPendingAfter: after.PaymentPendingQuota, PaymentAvailableAfter: after.PaymentAvailableQuota, PaymentTotalAfter: after.PaymentTotalQuota, PaymentDebtAfter: after.PaymentDebtQuota, PaymentAfter: after.PaymentQuota, PaymentReversedAfter: after.PaymentReversedQuota, PaymentWithdrawnAfter: after.PaymentWithdrawnQuota, PaymentTransferredAfter: after.PaymentTransferredQuota, PaymentOffsetAfter: after.PaymentOffsetQuota}
+	event := AgentSimpleLedger{DeltaCreditLimit: after.CreditLimitQuota - before.CreditLimitQuota, CreditLimitAfter: after.CreditLimitQuota, EventKey: fmt.Sprintf("simple:%d:%s:%s:%d", after.AgentUserID, kind, referenceID, after.Version), AgentUserID: after.AgentUserID, ActorUserID: actorID, Kind: kind, ReferenceType: referenceType, ReferenceID: referenceID, RequestID: requestID, Reason: reason, DeltaCashQuota: after.CashQuota - before.CashQuota, DeltaRewardQuota: after.RewardQuota - before.RewardQuota, DeltaRootQuota: after.RootQuota - before.RootQuota, DeltaCreditReserved: after.CreditReservedQuota - before.CreditReservedQuota, DeltaCreditOutstanding: after.CreditOutstandingQuota - before.CreditOutstandingQuota, DeltaPaymentPending: after.PaymentPendingQuota - before.PaymentPendingQuota, DeltaPaymentAvailable: after.PaymentAvailableQuota - before.PaymentAvailableQuota, DeltaPaymentTotal: after.PaymentTotalQuota - before.PaymentTotalQuota, DeltaPaymentDebt: after.PaymentDebtQuota - before.PaymentDebtQuota, DeltaPaymentQuota: after.PaymentQuota - before.PaymentQuota, DeltaPaymentReversed: after.PaymentReversedQuota - before.PaymentReversedQuota, DeltaPaymentWithdrawn: after.PaymentWithdrawnQuota - before.PaymentWithdrawnQuota, DeltaPaymentTransferred: after.PaymentTransferredQuota - before.PaymentTransferredQuota, DeltaPaymentOffset: after.PaymentOffsetQuota - before.PaymentOffsetQuota, CashAfter: after.CashQuota, RewardAfter: after.RewardQuota, RootAfter: after.RootQuota, CreditReservedAfter: after.CreditReservedQuota, CreditOutstandingAfter: after.CreditOutstandingQuota, PaymentPendingAfter: after.PaymentPendingQuota, PaymentAvailableAfter: after.PaymentAvailableQuota, PaymentTotalAfter: after.PaymentTotalQuota, PaymentDebtAfter: after.PaymentDebtQuota, PaymentAfter: after.PaymentQuota, PaymentReversedAfter: after.PaymentReversedQuota, PaymentWithdrawnAfter: after.PaymentWithdrawnQuota, PaymentTransferredAfter: after.PaymentTransferredQuota, PaymentOffsetAfter: after.PaymentOffsetQuota}
 	return tx.Create(&event).Error
 }
 

@@ -20,6 +20,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { Dialog } from '@/components/dialog'
 import { EmptyState } from '@/components/empty-state'
 import { ErrorState } from '@/components/error-state'
 import { SectionPageLayout } from '@/components/layout'
@@ -29,8 +30,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useRequestId } from '@/features/agent-platform/hooks/use-request-id'
 
 import { ActionForm, type ActionField } from './components/action-form'
-import { SimpleCodeRecords } from './components/simple-code-records'
+import { SimpleHistory } from './components/simple-history'
 import { SimplePaymentFeeForm } from './components/simple-payment-fee-form'
+import { SimpleRecordPager } from './components/simple-record-pager'
+import { SimpleRecords } from './components/simple-records'
 import {
   formatAgentCash,
   formatAgentQuota as formatQuota,
@@ -142,9 +145,10 @@ const actionFields: Record<string, ActionField[]> = {
 export function SimpleAgentFinance() {
   const { t } = useTranslation()
   const client = useQueryClient()
+  const [page, setPage] = useState(1)
   const query = useQuery({
-    queryKey: ['simple-root', 'agents'],
-    queryFn: () => getSimpleAgents({ p: 1, page_size: 100 }),
+    queryKey: ['simple-root', 'agents', page],
+    queryFn: () => getSimpleAgents({ p: page, page_size: 20 }),
   })
   const [selected, setSelected] = useState<SimpleAgentRow | null>(null)
   const [action, setAction] = useState<string | null>(null)
@@ -152,6 +156,8 @@ export function SimpleAgentFinance() {
   const [openAgent, setOpenAgent] = useState(false)
   const [feesOpen, setFeesOpen] = useState(false)
   const [userWithdrawalOpen, setUserWithdrawalOpen] = useState(false)
+  const [detailsAgent, setDetailsAgent] = useState<SimpleAgentRow | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const refresh = async () => {
     await client.invalidateQueries({ queryKey: ['simple-root'] })
     await client.invalidateQueries({ queryKey: ['agent-platform'] })
@@ -188,6 +194,13 @@ export function SimpleAgentFinance() {
                 >
                   {t('Record user withdrawal')}
                 </Button>
+                <Button
+                  className='w-fit'
+                  variant='outline'
+                  onClick={() => setHistoryOpen(true)}
+                >
+                  {t('All financial history')}
+                </Button>
               </CardHeader>
               <CardContent className='space-y-3'>
                 {!agents.length ? (
@@ -201,7 +214,11 @@ export function SimpleAgentFinance() {
                       <div className='min-w-44 flex-1'>
                         <div className='font-medium'>{agent.username}</div>
                         <div className='text-muted-foreground text-xs'>
-                          {agent.status}
+                          {{
+                            active: t('Active'),
+                            paused: t('Paused'),
+                            cancelled: t('Cancelled'),
+                          }[agent.status] ?? agent.status}
                           {agent.inactive ? ` · ${t('Inactive')}` : ''}
                         </div>
                       </div>
@@ -218,8 +235,23 @@ export function SimpleAgentFinance() {
                           {t('Amount due')}:{' '}
                           {formatAgentCash(agent.amount_due_quota)}
                         </div>
+                        {agent.overdue_quota > 0 && (
+                          <p role='status' className='text-destructive'>
+                            {t(
+                              'Overdue amount: {{amount}}. Please repay or contact support.',
+                              { amount: formatAgentCash(agent.overdue_quota) }
+                            )}
+                          </p>
+                        )}
                       </div>
                       <div className='flex flex-wrap gap-2'>
+                        <Button
+                          size='sm'
+                          variant='outline'
+                          onClick={() => setDetailsAgent(agent)}
+                        >
+                          {t('Fund details')}
+                        </Button>
                         <Button
                           size='sm'
                           variant='outline'
@@ -307,6 +339,11 @@ export function SimpleAgentFinance() {
                     </div>
                   ))
                 )}
+                <SimpleRecordPager
+                  page={page}
+                  total={query.data.total}
+                  onChange={setPage}
+                />
               </CardContent>
             </Card>
             {recordsAgent ? (
@@ -321,7 +358,10 @@ export function SimpleAgentFinance() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <SimpleCodeRecords agentUserId={recordsAgent} />
+                  <SimpleRecords
+                    key={recordsAgent}
+                    agentUserId={recordsAgent}
+                  />
                 </CardContent>
               </Card>
             ) : null}
@@ -332,6 +372,54 @@ export function SimpleAgentFinance() {
         <OpenAgentForm onClose={() => setOpenAgent(false)} onDone={refresh} />
       )}
       {feesOpen && <SimplePaymentFeeForm onClose={() => setFeesOpen(false)} />}
+      {historyOpen && (
+        <Dialog
+          open
+          title={t('All financial history')}
+          onOpenChange={(open) => {
+            if (!open) setHistoryOpen(false)
+          }}
+        >
+          <SimpleHistory />
+        </Dialog>
+      )}
+      {detailsAgent && (
+        <Dialog
+          open
+          title={`${t('Fund details')} · ${detailsAgent.username}`}
+          onOpenChange={(open) => {
+            if (!open) setDetailsAgent(null)
+          }}
+        >
+          <dl className='mb-4 grid grid-cols-2 gap-3 text-sm'>
+            {[
+              [t('Cash recharge'), formatQuota(detailsAgent.cash_quota)],
+              [
+                t('Referral reward ($)'),
+                formatQuota(detailsAgent.reward_quota),
+              ],
+              [
+                t('Transferred payment income'),
+                formatQuota(detailsAgent.payment_quota),
+              ],
+              [t('Root allocation'), formatQuota(detailsAgent.root_quota)],
+              [
+                t('Credit limit (CNY)'),
+                formatAgentCash(detailsAgent.credit_limit_quota),
+              ],
+            ].map(([label, value]) => (
+              <div key={label}>
+                <dt className='text-muted-foreground'>{label}</dt>
+                <dd className='font-medium'>{value}</dd>
+              </div>
+            ))}
+          </dl>
+          <SimpleHistory
+            key={detailsAgent.agent_user_id}
+            agentUserId={detailsAgent.agent_user_id}
+          />
+        </Dialog>
+      )}
       {userWithdrawalOpen && (
         <RootActionForm
           agent={{ agent_user_id: 0 }}

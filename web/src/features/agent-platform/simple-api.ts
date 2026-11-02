@@ -91,6 +91,35 @@ export interface SimplePaymentOrder {
   expires_at: number
   paid_at: number
   delivered_at: number
+  created_at: number
+  matures_at: number
+  profit_matured: boolean
+  redemption_id: number
+  redemption_key?: string
+  refund_reason?: string
+  refund_evidence?: string
+  refunded_by?: number
+  refunded_at?: number
+}
+
+export interface SimplePaymentQuote {
+  quota: number
+  sale_price_fen: number
+  cost_price_fen: number
+  fee_fen: number
+  profit_quota: number
+  minimum_sale_price_fen: number
+  fee_version: number
+  price_valid: boolean
+}
+
+export interface SimplePaymentRequest {
+  request_id: string
+  name: string
+  quota: number
+  sale_price_fen: number
+  payment_method: string
+  fee_version?: number
 }
 
 export interface SimplePaymentOrderPage {
@@ -144,18 +173,20 @@ export async function cancelSimpleCode(
   return postPlatform<Redemption>(`/simple/codes/${codeId}/cancel`, payload)
 }
 
-export async function createSimplePayment(payload: {
-  request_id: string
-  name: string
-  quota: number
-  sale_price_fen: number
-  payment_method: string
-}): Promise<{
+export async function createSimplePayment(
+  payload: SimplePaymentRequest
+): Promise<{
   order: SimplePaymentOrder
   payment_url: string
   payment_params: Record<string, unknown>
 }> {
   return postPlatform('/simple/payment', payload)
+}
+
+export function quoteSimplePayment(
+  payload: Omit<SimplePaymentRequest, 'request_id'>
+): Promise<SimplePaymentQuote> {
+  return postPlatform('/simple/payment/quote', payload)
 }
 
 export async function getSimplePaymentOrders(params?: {
