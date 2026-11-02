@@ -6353,6 +6353,7 @@
     "Release to join priority {{priority}}": "松手加入同级 · 优先级 {{priority}}",
     "Release unused credit": "释放未用授信",
     "Released": "发布于",
+    "Released income repays outstanding debt first. You can transfer the remainder to agent balance.": "已到账收益先抵扣待还款，剩余部分可转入代理余额。",
     "Released quota": "已释放额度",
     "Reload pricing": "重新加载定价",
     "Reload settings": "重新加载配置",

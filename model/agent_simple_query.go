@@ -42,8 +42,12 @@ func ListAgentSimpleAgents(identity AuthSessionIdentity, offset, limit int) ([]A
 			if err := tx.Model(&AgentSimpleBill{}).Where("agent_user_id = ? AND due_at <= ?", account.AgentUserID, common.GetTimestamp()).Select("COALESCE(SUM(quota - paid_quota),0)").Scan(&overdue).Error; err != nil {
 				return err
 			}
-			lastActivity := max(account.LastActivityAt, account.CreatedAt)
-			rows = append(rows, AgentSimpleAgentRow{AgentSimpleAccountView: *agentSimpleAccountView(&account, true), Username: user.Username, Inactive: lastActivity <= common.GetTimestamp()-90*24*60*60, Overdue: overdue, LastActive: account.LastActivityAt})
+			var lastSale int64
+			if err := tx.Model(&AgentSimpleLedger{}).Where("agent_user_id = ? AND kind IN ?", account.AgentUserID, []string{"code_issue", "payment_profit_pending"}).Select("COALESCE(MAX(created_at),0)").Scan(&lastSale).Error; err != nil {
+				return err
+			}
+			lastActivity := max(lastSale, account.CreatedAt)
+			rows = append(rows, AgentSimpleAgentRow{AgentSimpleAccountView: *agentSimpleAccountView(&account, true), Username: user.Username, Inactive: lastActivity <= common.GetTimestamp()-90*24*60*60, Overdue: overdue, LastActive: lastSale})
 		}
 		return nil
 	})

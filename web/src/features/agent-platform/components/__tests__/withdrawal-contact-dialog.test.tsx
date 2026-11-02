@@ -87,3 +87,18 @@ test('negative referral recovery does not reduce independent payment income', ()
   expect(screen.getAllByText('$20')).toHaveLength(2)
   expect(screen.queryByRole('status')).not.toBeInTheDocument()
 })
+
+test('payment recovery does not reduce independent referral income', () => {
+  render(
+    <WithdrawalContactDialog
+      userId={42}
+      referralQuota={15_000_000}
+      paymentQuota={0}
+      recoveryDebt={2_500_000}
+      onClose={vi.fn()}
+    />
+  )
+  expect(screen.getByText('$0')).toBeVisible()
+  expect(screen.getAllByText('$30')).toHaveLength(2)
+  expect(screen.queryByRole('status')).not.toBeInTheDocument()
+})

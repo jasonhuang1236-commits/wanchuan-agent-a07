@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestAgentSimpleWithdrawalCombinesSourcesAndSharesMonthlyLimit(t *testing.T) {
@@ -54,6 +55,80 @@ func TestAgentSimpleWithdrawalKeepsReferralRecoverySeparateFromPaymentIncome(t *
 	require.NoError(t, DB.First(&account, agent.UserID).Error)
 	assert.Zero(t, account.PaymentAvailableQuota)
 	assert.EqualValues(t, 10_000_000, account.PaymentWithdrawnQuota)
+}
+
+func TestAgentSimpleWithdrawalKeepsPaymentRecoverySeparateFromReferralIncome(t *testing.T) {
+	root, agent := simpleAccountingFixture(t)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", agent.UserID).Update("aff_quota", 15_000_000).Error)
+	require.NoError(t, DB.Model(&AgentSimpleAccount{}).Where("agent_user_id = ?", agent.UserID).Updates(map[string]any{"payment_reversed_quota": 2_500_000, "payment_debt_quota": 2_500_000}).Error)
+	request := AgentSimpleWithdrawalRequest{RequestID: "a07-independent-referral", UserID: agent.UserID, ReferralQuota: 15_000_000, Reason: "Synthetic referral payout", Evidence: "Synthetic completed payout"}
+	withPayment := request
+	withPayment.PaymentQuota = 1
+	_, err := RecordAgentSimpleWithdrawal(root, withPayment)
+	require.ErrorIs(t, err, ErrAgentSimpleInsufficient)
+	for range 2 {
+		result, err := RecordAgentSimpleWithdrawal(root, request)
+		require.NoError(t, err)
+		assert.Zero(t, result.PaymentQuota)
+		assert.EqualValues(t, 15_000_000, result.ReferralQuota)
+	}
+	assert.Zero(t, getUserBalances(t, agent.UserID).AffQuota)
+	var account AgentSimpleAccount
+	require.NoError(t, DB.First(&account, agent.UserID).Error)
+	assert.EqualValues(t, 2_500_000, account.PaymentDebtQuota)
+	assert.Zero(t, account.PaymentAvailableQuota)
+}
+
+func TestAgentSimplePaymentTransferOffsetsDebtBeforeMovingOnlyRemainingIncome(t *testing.T) {
+	_, agent := simpleAccountingFixture(t)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", agent.UserID).Update("aff_quota", 500_000).Error)
+	require.NoError(t, DB.Model(&AgentSimpleAccount{}).Where("agent_user_id = ?", agent.UserID).Updates(map[string]any{"credit_limit_quota": 5_000_000, "credit_outstanding_quota": 5_000_000, "payment_total_quota": 15_000_000, "payment_available_quota": 15_000_000}).Error)
+	require.NoError(t, DB.Create(&AgentSimpleCreditDebt{AgentUserID: agent.UserID, CodeID: 87101, Quota: 5_000_000}).Error)
+	request := AgentSimplePaymentTransferCommand{RequestID: "a07-transfer-net", Quota: 10_000_001, Reason: "Synthetic transfer"}
+	_, err := TransferAgentSimplePaymentProfit(agent, request)
+	require.ErrorIs(t, err, ErrAgentSimpleInsufficient, "gross income cannot be transferred before repaying the debt")
+	var account AgentSimpleAccount
+	require.NoError(t, DB.First(&account, agent.UserID).Error)
+	assert.EqualValues(t, 5_000_000, account.CreditOutstandingQuota, "an unsuccessful transfer must roll back its offset")
+	request.Quota--
+	for range 2 {
+		_, err := TransferAgentSimplePaymentProfit(agent, request)
+		require.NoError(t, err)
+	}
+	require.NoError(t, DB.First(&account, agent.UserID).Error)
+	assert.Zero(t, account.CreditOutstandingQuota)
+	assert.Zero(t, account.PaymentAvailableQuota)
+	assert.EqualValues(t, 10_000_000, account.PaymentQuota)
+	assert.EqualValues(t, 10_000_000, account.PaymentTransferredQuota)
+	assert.EqualValues(t, 5_000_000, account.PaymentOffsetQuota)
+	assert.Zero(t, account.CashQuota)
+	assert.EqualValues(t, 500_000, getUserBalances(t, agent.UserID).AffQuota)
+	require.NoError(t, validateAgentSimpleAccount(&account))
+}
+
+func TestAgentSimpleInactivityDependsOnSalesRatherThanRechargeOrOldCodeUse(t *testing.T) {
+	root, agent := simpleAccountingFixture(t)
+	old := common.GetTimestamp() - 91*24*60*60
+	require.NoError(t, DB.Model(&AgentSimpleAccount{}).Where("agent_user_id = ?", agent.UserID).Updates(map[string]any{"created_at": old, "last_activity_at": common.GetTimestamp(), "cash_quota": 1_000_000}).Error)
+	rows, _, err := ListAgentSimpleAgents(root, 0, 20)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.True(t, rows[0].Inactive, "non-sales activity must not clear the 90-day flag")
+	code, err := CreateAgentSimpleCode(agent, AgentSimpleCodeRequest{RequestID: "a07-recent-sale", Name: "Recent code", Quota: 500_000, Mode: AgentSimpleCodeDirect})
+	require.NoError(t, err)
+	rows, _, err = ListAgentSimpleAgents(root, 0, 20)
+	require.NoError(t, err)
+	assert.False(t, rows[0].Inactive)
+	require.NoError(t, DB.Session(&gorm.Session{SkipHooks: true}).Model(&AgentSimpleLedger{}).Where("agent_user_id = ? AND kind = ?", agent.UserID, "code_issue").UpdateColumn("created_at", old).Error)
+	_, err = Redeem(code.Key, agentTestRecipientID)
+	require.NoError(t, err)
+	rows, _, err = ListAgentSimpleAgents(root, 0, 20)
+	require.NoError(t, err)
+	assert.True(t, rows[0].Inactive, "redeeming an old code does not count as a new sale")
+	simpleAccountingPayment(t, agent, "a07-new-customer-payment", 120)
+	rows, _, err = ListAgentSimpleAgents(root, 0, 20)
+	require.NoError(t, err)
+	assert.False(t, rows[0].Inactive, "customer payment counts as sales activity")
 }
 
 func TestAgentSimpleWithdrawalOrdinaryUserAndFrozenRewardGuards(t *testing.T) {

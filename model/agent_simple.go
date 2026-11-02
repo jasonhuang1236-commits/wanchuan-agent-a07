@@ -1014,6 +1014,9 @@ func TransferAgentSimplePaymentProfit(identity AuthSessionIdentity, request Agen
 		if err != nil {
 			return err
 		}
+		if err := offsetAgentSimpleIncomeTx(tx, account, actor.Id, request.RequestID); err != nil {
+			return err
+		}
 		if account.PaymentAvailableQuota < request.Quota {
 			return ErrAgentSimpleInsufficient
 		}

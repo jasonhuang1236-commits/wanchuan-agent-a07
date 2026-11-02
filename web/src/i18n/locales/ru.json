@@ -6353,6 +6353,7 @@
     "Release to join priority {{priority}}": "Отпустите, чтобы присоединиться к приоритету {{priority}}",
     "Release unused credit": "Освободить неиспользованный кредит",
     "Released": "Выпущено",
+    "Released income repays outstanding debt first. You can transfer the remainder to agent balance.": "Доступный доход сначала погашает долг. Остаток можно перевести на баланс агента.",
     "Released quota": "Освобождённая квота",
     "Reload pricing": "Перезагрузить цены",
     "Reload settings": "Загрузить настройки заново",

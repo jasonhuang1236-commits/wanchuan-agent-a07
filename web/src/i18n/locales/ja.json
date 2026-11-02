@@ -6353,6 +6353,7 @@
     "Release to join priority {{priority}}": "離して優先度 {{priority}} に統合",
     "Release unused credit": "未使用与信を解放",
     "Released": "公開日",
+    "Released income repays outstanding debt first. You can transfer the remainder to agent balance.": "確定済み収益で未払いを先に返済し、残額を代理店残高に移せます。",
     "Released quota": "解放済みクォータ",
     "Reload pricing": "料金を再読み込み",
     "Reload settings": "設定を再読み込み",

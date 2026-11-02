@@ -175,7 +175,7 @@ func RecordAgentSimpleWithdrawal(identity AuthSessionIdentity, request AgentSimp
 			if err := offsetAgentSimpleIncomeTx(tx, &account, identity.UserID, request.RequestID); err != nil {
 				return err
 			}
-			if account.CreditOutstandingQuota > 0 || account.PaymentDebtQuota > 0 || account.PaymentAvailableQuota < request.PaymentQuota {
+			if account.CreditOutstandingQuota > 0 || (request.PaymentQuota > 0 && account.PaymentDebtQuota > 0) || account.PaymentAvailableQuota < request.PaymentQuota {
 				return ErrAgentSimpleInsufficient
 			}
 		} else if request.PaymentQuota > 0 {

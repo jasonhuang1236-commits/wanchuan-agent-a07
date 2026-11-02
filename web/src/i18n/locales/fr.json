@@ -6353,6 +6353,7 @@
     "Release to join priority {{priority}}": "Relâcher pour rejoindre la priorité {{priority}}",
     "Release unused credit": "Libérer le crédit inutilisé",
     "Released": "Sorti",
+    "Released income repays outstanding debt first. You can transfer the remainder to agent balance.": "Les revenus disponibles remboursent d’abord la dette. Le reste peut être transféré au solde agent.",
     "Released quota": "Quota libéré",
     "Reload pricing": "Recharger les tarifs",
     "Reload settings": "Recharger les paramètres",

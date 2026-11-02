@@ -109,6 +109,12 @@ export function AgentPortal() {
   }
 
   const account = balance.data
+  const transferablePayment = Math.max(
+    0,
+    account.payment_available_quota -
+      account.payment_debt_quota -
+      account.amount_due_quota
+  )
   const redemptions = recent.data?.items ?? []
   let recentContent
   if (recent.isLoading) {
@@ -184,10 +190,7 @@ export function AgentPortal() {
                     variant='outline'
                     onClick={() => setIncomeTransferOpen(true)}
                     disabled={
-                      account.status !== 'active' ||
-                      account.payment_available_quota <= 0 ||
-                      account.amount_due_quota > 0 ||
-                      account.payment_debt_quota > 0
+                      account.status !== 'active' || transferablePayment <= 0
                     }
                   >
                     {t('Transfer payment income to agent balance')}
@@ -196,7 +199,7 @@ export function AgentPortal() {
                     account.payment_debt_quota > 0) && (
                     <p className='text-xs text-sky-100/75'>
                       {t(
-                        'Income transfers are available after outstanding debt has been settled.'
+                        'Released income repays outstanding debt first. You can transfer the remainder to agent balance.'
                       )}
                     </p>
                   )}
@@ -349,7 +352,7 @@ export function AgentPortal() {
       )}
       {incomeTransferOpen && (
         <SimpleIncomeTransferForm
-          availableQuota={account.payment_available_quota}
+          availableQuota={transferablePayment}
           onClose={() => setIncomeTransferOpen(false)}
         />
       )}
