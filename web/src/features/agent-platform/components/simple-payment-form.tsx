@@ -23,8 +23,8 @@ import { CopyButton } from '@/components/copy-button'
 import { Dialog } from '@/components/dialog'
 import { Button } from '@/components/ui/button'
 import { useRequestId } from '@/features/agent-platform/hooks/use-request-id'
-import { parseQuotaFromDollars } from '@/lib/format'
 
+import { parseAgentQuota } from '../lib/money'
 import { createSimplePayment, getSimplePaymentMethods } from '../simple-api'
 import { ActionForm, type ActionField } from './action-form'
 
@@ -41,7 +41,7 @@ export function SimplePaymentForm(props: { onClose: () => void }) {
   const [createdURL, setCreatedURL] = useState('')
   const info = useQuery({
     queryKey: ['agent-platform', 'simple-payment-methods'],
-    queryFn: getSimplePaymentMethods,
+    queryFn: () => getSimplePaymentMethods(),
   })
 
   if (info.isPending) return null
@@ -112,10 +112,11 @@ export function SimplePaymentForm(props: { onClose: () => void }) {
       initial={{ payment_method: methods[0].payment_method }}
       onClose={props.onClose}
       onSubmit={async (values) => {
-        const quota = parseQuotaFromDollars(Number(values.quota))
+        const quota = parseAgentQuota(String(values.quota)) ?? 0
         const salePriceFen = parseSalePrice(String(values.sale_price))
-        if (!Number.isSafeInteger(quota) || quota <= 0 || salePriceFen <= 0)
-          {throw new Error(t('Invalid payment code request'))}
+        if (!Number.isSafeInteger(quota) || quota <= 0 || salePriceFen <= 0) {
+          throw new Error(t('Invalid payment code request'))
+        }
         const result = await createSimplePayment({
           request_id: requestId(values),
           name: String(values.name).trim(),
@@ -123,8 +124,9 @@ export function SimplePaymentForm(props: { onClose: () => void }) {
           sale_price_fen: salePriceFen,
           payment_method: String(values.payment_method),
         })
-        if (!result.order.customer_url)
-          {throw new Error(t('Payment link was not created'))}
+        if (!result.order.customer_url) {
+          throw new Error(t('Payment link was not created'))
+        }
         setCreatedURL(result.order.customer_url)
         toast.success(t('Customer payment link created'))
       }}

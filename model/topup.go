@@ -14,6 +14,8 @@ import (
 
 type TopUp struct {
 	AgentSimpleTopUp      bool    `json:"agent_simple_topup,omitempty" gorm:"not null;default:false;index"`
+	AgentSimpleKind       string  `json:"agent_simple_kind,omitempty" gorm:"type:varchar(16);not null;default:''"`
+	AgentSimpleQuota      int64   `json:"agent_simple_quota,omitempty" gorm:"type:bigint;not null;default:0"`
 	PaymentReceiptID      int64   `json:"payment_receipt_id"`
 	PaidProviderReference string  `json:"-" gorm:"type:varchar(255)"`
 	PaidMerchantScope     string  `json:"-" gorm:"type:varchar(128)"`
@@ -239,7 +241,18 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, actualMoney string
 		if !callbackMoney.Equal(expectedMoney) {
 			return ErrPaymentAmountMismatch
 		}
+		if topUp.AgentSimpleTopUp && (len(facts) != 1 || actualPaymentMethod != topUp.PaymentMethod) {
+			return ErrAgentPaymentReceiptConflict
+		}
 		if topUp.Status == common.TopUpStatusSuccess {
+			if topUp.AgentSimpleTopUp && len(facts) > 0 {
+				if err := applyAgentVerifiedPaymentTx(tx, topUp, facts); err != nil {
+					return err
+				}
+				if err := tx.Save(topUp).Error; err != nil {
+					return err
+				}
+			}
 			alreadyDone = true
 			return nil
 		}
@@ -255,6 +268,9 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, actualMoney string
 		quotaToAdd, quotaErr = common.WalletQuotaFromDecimalStrict(
 			decimal.NewFromInt(topUp.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
 		)
+		if topUp.AgentSimpleTopUp && topUp.AgentSimpleQuota > 0 {
+			quotaToAdd, quotaErr = common.WalletQuotaFromDecimalStrict(decimal.NewFromInt(topUp.AgentSimpleQuota))
+		}
 		if quotaErr != nil || quotaToAdd <= 0 {
 			return errors.New("无效的充值额度")
 		}

@@ -175,7 +175,7 @@ func TestAgentSimpleRechargeDoesNotCreditOrdinaryWalletOrReferralOutbox(t *testi
 		Status:           common.TopUpStatusPending,
 	}).Error)
 
-	alreadyDone, err := RechargeEpay("SIMPLE-RECHARGE-1", "alipay", "9.00", "127.0.0.1")
+	alreadyDone, err := RechargeEpay("SIMPLE-RECHARGE-1", "alipay", "9.00", "127.0.0.1", simpleVerifiedEpayFacts(t, "SIMPLE-RECHARGE-1", "9.00"))
 	require.NoError(t, err)
 	assert.False(t, alreadyDone)
 
@@ -216,10 +216,10 @@ func TestAgentSimplePaymentSettlementDeliversSameRedemptionCode(t *testing.T) {
 	assert.Equal(t, AgentSimplePaymentPending, order.Status)
 	assert.Contains(t, order.CustomerURL, "/agent-pay/PAY-PUBLIC-1#token=")
 
-	done, err := SettleAgentSimplePaymentByTradeNo("PAY-TRADE-1", "alipay", "1.20")
+	done, err := SettleAgentSimplePaymentByTradeNo("PAY-TRADE-1", "alipay", "1.20", simpleVerifiedEpayFacts(t, "PAY-TRADE-1", "1.20"))
 	require.NoError(t, err)
 	assert.False(t, done)
-	done, err = SettleAgentSimplePaymentByTradeNo("PAY-TRADE-1", "alipay", "1.20")
+	done, err = SettleAgentSimplePaymentByTradeNo("PAY-TRADE-1", "alipay", "1.20", simpleVerifiedEpayFacts(t, "PAY-TRADE-1", "1.20"))
 	require.NoError(t, err)
 	assert.True(t, done)
 
@@ -256,7 +256,7 @@ func TestAgentSimplePaymentCallbackRejectsWrongAmountWithoutDelivering(t *testin
 	request := AgentSimplePaymentRequest{RequestID: "simple-payment-order-amount", Name: "Amount guarded", Quota: int64(common.QuotaPerUnit), SalePriceFen: 120, PaymentMethod: "alipay"}
 	_, err = CreateAgentSimplePaymentOrder(agentIdentity, request, "PAY-PUBLIC-2", "payment-token-for-test-111111111111111111111111111111111111", "PAY-TRADE-2", "https://pay.example/submit", `{"pid":"fixture"}`, "https://example.test")
 	require.NoError(t, err)
-	_, err = SettleAgentSimplePaymentByTradeNo("PAY-TRADE-2", "alipay", "1.19")
+	_, err = SettleAgentSimplePaymentByTradeNo("PAY-TRADE-2", "alipay", "1.19", simpleVerifiedEpayFacts(t, "PAY-TRADE-2", "1.19"))
 	require.ErrorIs(t, err, ErrPaymentAmountMismatch)
 	var order AgentSimplePaymentOrder
 	require.NoError(t, DB.Where("trade_no = ?", "PAY-TRADE-2").First(&order).Error)

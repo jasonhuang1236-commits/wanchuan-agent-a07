@@ -2,7 +2,6 @@ package controller
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -61,31 +60,16 @@ func RequestAgentSimpleRecharge(c *gin.Context) {
 		writeAgentSimpleError(c, model.ErrAgentSimplePermission)
 		return
 	}
-	var request struct {
-		Amount        int64  `json:"amount"`
-		PaymentMethod string `json:"payment_method"`
-	}
-	if err := common.DecodeJsonStrict(c.Request.Body, &request); err != nil || request.Amount <= 0 || !operation_setting.ContainsPayMethod(request.PaymentMethod) {
+	var request model.AgentSimpleRechargeRequest
+	if err := common.DecodeJsonStrict(c.Request.Body, &request); err != nil || !operation_setting.ContainsPayMethod(request.PaymentMethod) || !isAgentSimpleEpayMethod(request.PaymentMethod) {
 		writeAgentSimpleError(c, model.ErrAgentSimpleInvalid)
 		return
 	}
-	quota, err := common.WalletQuotaFromDecimalStrict(
-		decimal.NewFromInt(request.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
-	)
-	if err != nil || quota <= 0 {
-		writeAgentSimpleError(c, model.ErrAgentSimpleInvalid)
-		return
-	}
-	if _, err := model.GetAgentSimpleAccount(identity, identity.UserID); err != nil {
+	quote, err := model.QuoteAgentSimpleRecharge(request)
+	if err != nil {
 		writeAgentSimpleError(c, err)
 		return
 	}
-	payMoneyDecimal := decimal.NewFromInt(request.Amount).Mul(decimal.NewFromFloat(0.9)).Round(2)
-	if payMoneyDecimal.LessThan(decimal.NewFromFloat(0.01)) {
-		writeAgentSimpleError(c, model.ErrAgentSimpleInvalid)
-		return
-	}
-	payMoney := payMoneyDecimal.InexactFloat64()
 	client := GetEpayClient()
 	if client == nil {
 		common.ApiErrorStatus(c, http.StatusServiceUnavailable, common.NewMessage("Payment information has not been configured by administrator"))
@@ -97,19 +81,31 @@ func RequestAgentSimpleRecharge(c *gin.Context) {
 		return
 	}
 	callbackAddress := service.GetCallbackAddress()
-	returnURL, _ := url.Parse(paymentReturnPath("/agent-platform"))
-	notifyURL, _ := url.Parse(callbackAddress + "/api/user/epay/notify")
-	uri, params, err := client.Purchase(&epay.PurchaseArgs{Type: request.PaymentMethod, ServiceTradeNo: tradeNo, Name: "代理余额充值", Money: fmt.Sprintf("%.2f", payMoney), Device: epay.PC, NotifyUrl: notifyURL, ReturnUrl: returnURL})
+	returnURL, err := url.Parse(paymentReturnPath("/agent-platform"))
+	if err != nil {
+		writeAgentSimpleError(c, model.ErrAgentSimpleInvalid)
+		return
+	}
+	notifyURL, err := url.Parse(callbackAddress + "/api/user/epay/notify")
+	if err != nil {
+		writeAgentSimpleError(c, model.ErrAgentSimpleInvalid)
+		return
+	}
+	name := "代理余额充值"
+	if request.Kind == "repayment" {
+		name = "代理还款"
+	}
+	uri, params, err := client.Purchase(&epay.PurchaseArgs{Type: request.PaymentMethod, ServiceTradeNo: tradeNo, Name: name, Money: decimal.NewFromInt(quote.PayFen).Div(decimal.NewFromInt(100)).StringFixed(2), Device: epay.PC, NotifyUrl: notifyURL, ReturnUrl: returnURL})
 	if err != nil {
 		writeAgentSimpleError(c, err)
 		return
 	}
-	topUp := &model.TopUp{AgentSimpleTopUp: true, UserId: identity.UserID, Amount: request.Amount, Money: payMoney, TradeNo: tradeNo, PaymentMethod: request.PaymentMethod, PaymentProvider: model.PaymentProviderEpay, CreateTime: time.Now().Unix(), Status: common.TopUpStatusPending}
-	if err := topUp.Insert(); err != nil {
+	result, err := model.CreateAgentSimpleRecharge(identity, request, tradeNo, uri, params)
+	if err != nil {
 		writeAgentSimpleError(c, err)
 		return
 	}
-	common.ApiSuccess(c, gin.H{"url": uri, "data": params, "quota": quota, "pay_yuan": payMoney})
+	common.ApiSuccess(c, result)
 }
 
 func CreateAgentSimpleCode(c *gin.Context) {
@@ -241,7 +237,7 @@ func GetAgentSimplePaymentMethods(c *gin.Context) {
 		writeAgentSimpleError(c, model.ErrAgentSimplePermission)
 		return
 	}
-	methods, err := model.GetAgentSimpleAvailablePaymentMethods(identity)
+	methods, err := model.GetAgentSimpleAvailablePaymentMethods(identity, c.Query("purpose"))
 	if err != nil {
 		writeAgentSimpleError(c, err)
 		return

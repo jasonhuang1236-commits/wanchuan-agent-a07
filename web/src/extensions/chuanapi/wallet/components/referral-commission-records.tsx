@@ -99,10 +99,10 @@ export function ReferralCommissionRecords(
       id: 'status',
       header: t('Status'),
       cell: (row) => {
-        if (row.status === 'cancelled') return t('Cancelled')
-        if (row.status === 'released') return t('Released')
+        if (row.status === 'cancelled') return t('Reward cancelled')
         if (row.reversed_quota > 0) return t('Partially reversed')
-        return t('Frozen')
+        if (row.status === 'released') return t('Reward released')
+        return t('Reward pending')
       },
     },
     {

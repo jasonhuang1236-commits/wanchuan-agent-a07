@@ -21,8 +21,8 @@ import { CopyButton } from '@/components/copy-button'
 import { EmptyState } from '@/components/empty-state'
 import { ErrorState } from '@/components/error-state'
 import { LoadingState } from '@/components/loading-state'
-import { formatQuota } from '@/lib/format'
 
+import { formatAgentQuota as formatQuota } from '../lib/money'
 import { getSimplePaymentOrders, type SimplePaymentOrder } from '../simple-api'
 
 export function SimplePaymentRecords(props: { agentUserId?: number }) {

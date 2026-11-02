@@ -70,7 +70,10 @@ export function AffiliateRewardsCard(props: AffiliateRewardsCardProps) {
   const hasRewards = props.availableQuota > 0
   const stats = [
     [t('Referral Rewards Available'), formatQuota(props.availableQuota)],
-    [t('Total Rewards'), formatQuota(props.user?.aff_history_quota ?? 0)],
+    [
+      t('Cumulative referral rewards'),
+      formatQuota(props.user?.aff_history_quota ?? 0),
+    ],
     [t('Referral Invited Users'), String(props.user?.aff_count ?? 0)],
   ]
 

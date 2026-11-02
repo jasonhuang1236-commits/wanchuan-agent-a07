@@ -35,6 +35,7 @@ export interface SimpleAgentBalance {
   available_credit_quota: number
   amount_due_quota: number
   reserved_quota: number
+  overdue_quota?: number
 }
 
 export interface SimpleCodeRecord {
@@ -128,7 +129,9 @@ export async function createSimpleCode(
 }
 
 export async function requestSimpleRecharge(payload: {
-  amount: number
+  request_id: string
+  amount: string
+  kind: 'recharge' | 'repayment'
   payment_method: string
 }): Promise<SimpleRechargeResponse> {
   return postPlatform<SimpleRechargeResponse>('/simple/recharge', payload)
@@ -163,8 +166,10 @@ export async function getSimplePaymentOrders(params?: {
   return getPlatform<SimplePaymentOrderPage>('/simple/payment-orders', params)
 }
 
-export async function getSimplePaymentMethods(): Promise<
-  SimplePaymentMethod[]
-> {
-  return getPlatform<SimplePaymentMethod[]>('/simple/payment-methods')
+export async function getSimplePaymentMethods(
+  purpose: 'payment' | 'recharge' | 'repayment' = 'payment'
+): Promise<SimplePaymentMethod[]> {
+  return getPlatform<SimplePaymentMethod[]>('/simple/payment-methods', {
+    purpose,
+  })
 }

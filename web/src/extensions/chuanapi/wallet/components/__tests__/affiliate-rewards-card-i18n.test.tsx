@@ -88,13 +88,13 @@ function renderChineseCard(overrides: Record<string, unknown> = {}) {
 }
 
 describe('affiliate rewards card Chinese copy', () => {
-  test('renders the approved Chinese titles, stats, and four rule sentences', () => {
+  test('renders the approved Chinese titles, available rewards, and unlimited five-day reward rules', () => {
     renderChineseCard()
 
     expect(screen.getByText('邀请奖励')).toBeInTheDocument()
     expect(screen.getByText('邀请好友获得额外奖励')).toBeInTheDocument()
-    expect(screen.getByText('待使用收益')).toBeInTheDocument()
-    expect(screen.getByText('总收益')).toBeInTheDocument()
+    expect(screen.getByText('邀请返利可提现')).toBeInTheDocument()
+    expect(screen.getByText('累计邀请返利')).toBeInTheDocument()
     expect(screen.getByText('邀请人数')).toBeInTheDocument()
     expect(screen.getByLabelText('邀请链接')).toHaveDisplayValue(affiliateLink)
     expect(
@@ -107,18 +107,14 @@ describe('affiliate rewards card Chinese copy', () => {
       screen.getByRole('button', { name: '划转到余额' })
     ).toBeInTheDocument()
 
+    expect(screen.getByText('仅官网在线充值参与邀请返利。')).toBeInTheDocument()
     expect(
-      screen.getByText('邀请好友注册，好友充值后您可获得相应奖励')
+      screen.getByText('好友每次符合条件的充值均可获得 5.0% 返利，不封顶。')
     ).toBeInTheDocument()
     expect(
-      screen.getByText('好友前3次充值，您可获得充值额度的 5.0% 作为奖励')
+      screen.getByText('返利冻结 5 天后到账；退款时取消或扣回对应返利。')
     ).toBeInTheDocument()
-    expect(
-      screen.getByText('通过划转功能将奖励额度转入您的账户余额中')
-    ).toBeInTheDocument()
-    expect(
-      screen.getByText('邀请的好友越多，获得的奖励就越多')
-    ).toBeInTheDocument()
+    expect(screen.getByText('已到账')).toBeVisible()
     expect(
       screen.getByText(new Date(record.created_at * 1000).toLocaleString('zh'))
     ).toBeInTheDocument()
@@ -128,7 +124,7 @@ describe('affiliate rewards card Chinese copy', () => {
     renderChineseCard({ referralRate: 0.0333 })
 
     expect(
-      screen.getByText('好友前3次充值，您可获得充值额度的 3.33% 作为奖励')
+      screen.getByText('好友每次符合条件的充值均可获得 3.33% 返利，不封顶。')
     ).toBeInTheDocument()
   })
 

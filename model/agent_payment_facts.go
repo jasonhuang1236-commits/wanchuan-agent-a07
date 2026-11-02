@@ -63,9 +63,19 @@ func applyAgentVerifiedPaymentTx(tx *gorm.DB, topup *TopUp, facts []AgentVerifie
 		return ErrAgentPaymentReceiptConflict
 	}
 	f := facts[0]
-	receipt, err := ClaimAgentPaymentReceiptTx(tx, &AgentPaymentReceipt{Provider: f.Provider, ProviderReference: f.ExternalReference, MerchantScope: f.MerchantScope, Environment: f.Environment, Purpose: "topup", LocalOrderKey: topup.TradeNo, OwnerUserID: topup.UserId, Currency: f.Currency, CurrencyExponent: f.CurrencyExponent, PaidMinor: f.PaidMinor, PaidAt: common.GetTimestamp(), VerifiedAt: common.GetTimestamp()})
+	purpose := "topup"
+	if topup.AgentSimpleTopUp {
+		purpose = "agent_recharge"
+		if f.Currency != "CNY" || f.CurrencyExponent != 2 || !decimal.NewFromInt(f.PaidMinor).Equal(decimal.NewFromFloat(topup.Money).Round(2).Shift(2)) {
+			return ErrAgentPaymentReceiptConflict
+		}
+	}
+	receipt, err := ClaimAgentPaymentReceiptTx(tx, &AgentPaymentReceipt{Provider: f.Provider, ProviderReference: f.ExternalReference, MerchantScope: f.MerchantScope, Environment: f.Environment, Purpose: purpose, LocalOrderKey: topup.TradeNo, OwnerUserID: topup.UserId, Currency: f.Currency, CurrencyExponent: f.CurrencyExponent, PaidMinor: f.PaidMinor, PaidAt: common.GetTimestamp(), VerifiedAt: common.GetTimestamp()})
 	if err != nil {
 		return err
+	}
+	if topup.PaymentReceiptID != 0 && topup.PaymentReceiptID != receipt.ID {
+		return ErrAgentPaymentReceiptConflict
 	}
 	topup.PaymentReceiptID = receipt.ID
 	topup.PaidProviderReference = f.ExternalReference

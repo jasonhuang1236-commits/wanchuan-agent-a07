@@ -55,7 +55,7 @@ func ValidateAgentPaymentReceipt(receipt *AgentPaymentReceipt) error {
 	if receipt.Provider == PaymentProviderStripe && !strings.HasPrefix(receipt.ProviderReference, "pi_") {
 		return ErrAgentPaymentReceiptConflict
 	}
-	if receipt.Purpose != "topup" && receipt.Purpose != "purchase" && receipt.Purpose != "credit_repayment" && receipt.Purpose != "deposit" {
+	if receipt.Purpose != "topup" && receipt.Purpose != "purchase" && receipt.Purpose != "credit_repayment" && receipt.Purpose != "deposit" && receipt.Purpose != "payment_code" && receipt.Purpose != "agent_recharge" {
 		return ErrAgentPaymentReceiptConflict
 	}
 	if receipt.Environment != "live" && receipt.Environment != "test" {

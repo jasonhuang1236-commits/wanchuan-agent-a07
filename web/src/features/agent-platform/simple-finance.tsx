@@ -27,10 +27,15 @@ import { LoadingState } from '@/components/loading-state'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useRequestId } from '@/features/agent-platform/hooks/use-request-id'
-import { formatQuota, parseQuotaFromDollars } from '@/lib/format'
 
 import { ActionForm, type ActionField } from './components/action-form'
 import { SimpleCodeRecords } from './components/simple-code-records'
+import { SimplePaymentFeeForm } from './components/simple-payment-fee-form'
+import {
+  formatAgentCash,
+  formatAgentQuota as formatQuota,
+  parseAgentQuota,
+} from './lib/money'
 import {
   getSimpleAgents,
   adjustSimpleBalance,
@@ -49,33 +54,68 @@ const actionFields: Record<string, ActionField[]> = {
       label: 'Balance adjustment ($)',
       kind: 'text',
       validate: (value) =>
-        /^-?\d+(\.\d{1,6})?$/.test(String(value)) && Number(value) !== 0
+        /^-?\d+(\.\d{1,2})?$/.test(String(value)) && Number(value) !== 0
           ? undefined
           : 'Enter a valid amount',
     },
     { name: 'reason', label: 'Reason', kind: 'textarea', max: 255 },
   ],
   credit: [
-    { name: 'limit', label: 'Credit limit ($)', kind: 'integer', min: 0 },
+    {
+      name: 'limit',
+      label: 'Credit limit (CNY)',
+      kind: 'text',
+      validate: (value) =>
+        (parseAgentQuota(String(value)) ?? -1) >= 0
+          ? undefined
+          : 'Enter a valid amount',
+    },
     { name: 'reason', label: 'Reason', kind: 'textarea', max: 255 },
   ],
   repay: [
-    { name: 'quota', label: 'Repayment ($)', kind: 'integer', min: 1 },
+    {
+      name: 'quota',
+      label: 'Repayment amount (CNY)',
+      kind: 'text',
+      validate: (value) =>
+        (parseAgentQuota(String(value)) ?? 0) > 0
+          ? undefined
+          : 'Enter a valid amount',
+    },
     { name: 'reason', label: 'Reason', kind: 'textarea', max: 255 },
   ],
   withdrawal: [
-    { name: 'referral', label: 'Referral reward ($)', kind: 'integer', min: 0 },
+    {
+      name: 'referral',
+      label: 'Referral reward ($)',
+      kind: 'text',
+      validate: (value) =>
+        (parseAgentQuota(String(value)) ?? -1) >= 0
+          ? undefined
+          : 'Enter a valid amount',
+    },
     {
       name: 'payment',
       label: 'Payment-code profit ($)',
-      kind: 'integer',
-      min: 0,
+      kind: 'text',
+      validate: (value) =>
+        (parseAgentQuota(String(value)) ?? -1) >= 0
+          ? undefined
+          : 'Enter a valid amount',
     },
     { name: 'reason', label: 'Reason', kind: 'textarea', max: 255 },
     { name: 'evidence', label: 'Support evidence', kind: 'textarea', max: 255 },
   ],
   exit: [
-    { name: 'quota', label: 'Amount ($)', kind: 'integer', min: 1 },
+    {
+      name: 'quota',
+      label: 'Amount ($)',
+      kind: 'text',
+      validate: (value) =>
+        (parseAgentQuota(String(value)) ?? 0) > 0
+          ? undefined
+          : 'Enter a valid amount',
+    },
     {
       name: 'source',
       label: 'Source',
@@ -110,6 +150,7 @@ export function SimpleAgentFinance() {
   const [action, setAction] = useState<string | null>(null)
   const [recordsAgent, setRecordsAgent] = useState<number | undefined>()
   const [openAgent, setOpenAgent] = useState(false)
+  const [feesOpen, setFeesOpen] = useState(false)
   const refresh = async () => {
     await client.invalidateQueries({ queryKey: ['simple-root'] })
     await client.invalidateQueries({ queryKey: ['agent-platform'] })
@@ -131,6 +172,13 @@ export function SimpleAgentFinance() {
                 <CardTitle>{t('Agents')}</CardTitle>
                 <Button className='w-fit' onClick={() => setOpenAgent(true)}>
                   {t('Open agent')}
+                </Button>
+                <Button
+                  className='w-fit'
+                  variant='outline'
+                  onClick={() => setFeesOpen(true)}
+                >
+                  {t('Payment channel fees')}
                 </Button>
               </CardHeader>
               <CardContent className='space-y-3'>
@@ -156,11 +204,11 @@ export function SimpleAgentFinance() {
                         </div>
                         <div>
                           {t('Available credit')}:{' '}
-                          {formatQuota(agent.available_credit_quota)}
+                          {formatAgentCash(agent.available_credit_quota)}
                         </div>
                         <div>
                           {t('Amount due')}:{' '}
-                          {formatQuota(agent.amount_due_quota)}
+                          {formatAgentCash(agent.amount_due_quota)}
                         </div>
                       </div>
                       <div className='flex flex-wrap gap-2'>
@@ -275,6 +323,7 @@ export function SimpleAgentFinance() {
       {openAgent && (
         <OpenAgentForm onClose={() => setOpenAgent(false)} onDone={refresh} />
       )}
+      {feesOpen && <SimplePaymentFeeForm onClose={() => setFeesOpen(false)} />}
       {selected &&
       action &&
       action !== 'pause' &&
@@ -374,7 +423,7 @@ function RootActionForm(props: {
       onSubmit={async (values) => {
         const id = requestId(values)
         const quota = (name: string) =>
-          parseQuotaFromDollars(Number(values[name] ?? 0))
+          parseAgentQuota(String(values[name] ?? '0')) ?? Number.NaN
         if (props.action === 'adjust') {
           await adjustSimpleBalance({
             request_id: id,

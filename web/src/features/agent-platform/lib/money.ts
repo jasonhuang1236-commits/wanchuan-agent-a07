@@ -17,6 +17,32 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 /** Fixed-source money is not converted using the site's display exchange rate. */
+import { getCurrencyDisplay } from '@/lib/currency'
+
+export function formatAgentCash(quota: number): string {
+  return `¥${(quota / getCurrencyDisplay().config.quotaPerUnit).toFixed(2)}`
+}
+
+export function formatAgentQuota(quota: number): string {
+  return `$${(quota / getCurrencyDisplay().config.quotaPerUnit).toLocaleString('en-US', { maximumFractionDigits: 2 })}`
+}
+
+/** A07 face values and CNY cost units do not use the wallet display exchange rate. */
+export function parseAgentQuota(value: string): number | null {
+  if (!/^-?\d+(?:\.\d{1,2})?$/.test(value)) return null
+  const unit = getCurrencyDisplay().config.quotaPerUnit
+  if (!Number.isSafeInteger(unit) || unit <= 0) return null
+  const negative = value.startsWith('-')
+  const [whole, fraction = ''] = value.replace(/^-/, '').split('.')
+  const numerator =
+    (BigInt(whole) * 100n + BigInt(fraction.padEnd(2, '0'))) * BigInt(unit)
+  if (numerator % 100n || numerator / 100n > BigInt(Number.MAX_SAFE_INTEGER)) {
+    return null
+  }
+  const quota = Number(numerator / 100n)
+  return negative ? -quota : quota
+}
+
 export function formatMinorMoney(
   minor: string,
   currency: string,

@@ -413,10 +413,14 @@ func EpayNotify(c *gin.Context) {
 		// enter the ordinary wallet top-up ledger.
 		LockOrder(verifyInfo.ServiceTradeNo)
 		defer UnlockOrder(verifyInfo.ServiceTradeNo)
+		var paymentFacts []model.AgentVerifiedPaymentFacts
+		if fact, ok := model.NewAgentVerifiedPaymentFacts(model.PaymentProviderEpay, params["trade_no"], operation_setting.EpayId, "live", "CNY", verifyInfo.Money, false); ok {
+			paymentFacts = append(paymentFacts, fact)
+		}
 		var simpleDone bool
 		simpleErr := model.DB.Transaction(func(tx *gorm.DB) error {
 			var settlementErr error
-			simpleDone, settlementErr = model.SettleAgentSimplePaymentCallbackTx(tx, verifyInfo.ServiceTradeNo, verifyInfo.Type, verifyInfo.Money, common.GetTimestamp())
+			simpleDone, settlementErr = model.SettleAgentSimplePaymentCallbackTx(tx, verifyInfo.ServiceTradeNo, verifyInfo.Type, verifyInfo.Money, common.GetTimestamp(), paymentFacts...)
 			return settlementErr
 		})
 		if simpleErr == nil {
@@ -437,10 +441,6 @@ func EpayNotify(c *gin.Context) {
 		}
 		// 进程内锁只是优化；重复/并发回调的正确性由 RechargeEpay 的
 		// 数据库行锁 + 事务内状态校验保证（多实例部署下同样安全）。
-		var paymentFacts []model.AgentVerifiedPaymentFacts
-		if fact, ok := model.NewAgentVerifiedPaymentFacts(model.PaymentProviderEpay, params["trade_no"], operation_setting.EpayId, "live", "CNY", verifyInfo.Money, false); ok {
-			paymentFacts = append(paymentFacts, fact)
-		}
 		alreadyDone, err := model.RechargeEpay(verifyInfo.ServiceTradeNo, verifyInfo.Type, verifyInfo.Money, c.ClientIP(), paymentFacts...)
 		if err != nil {
 			switch {

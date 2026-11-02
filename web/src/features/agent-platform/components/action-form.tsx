@@ -120,11 +120,11 @@ export function ActionForm(props: {
           context.addIssue({
             code: 'custom',
             path: [field.name],
-            message:
-              customError ??
-              t('Enter a valid value for {{field}}', {
-                field: t(field.label),
-              }),
+            message: customError
+              ? t(customError)
+              : t('Enter a valid value for {{field}}', {
+                  field: t(field.label),
+                }),
           })
         }
       }
@@ -176,7 +176,9 @@ export function ActionForm(props: {
       <Form {...form}>
         <form
           id={formId}
-          onSubmit={form.handleSubmit(submit)}
+          onSubmit={(event) => {
+            void form.handleSubmit(submit)(event)
+          }}
           className='flex flex-col gap-4'
         >
           {props.fields.map((definition) => (
@@ -222,6 +224,7 @@ function ActionControl({
 }) {
   const { t } = useTranslation()
   const { setValue } = useFormContext<ActionValues>()
+  const { ref: inputRef, ...input } = field
   const fileRead = useRef(0)
   useEffect(
     () => () => {
@@ -233,11 +236,11 @@ function ActionControl({
     return (
       <Checkbox
         {...controlProps}
-        checked={field.value === true}
-        onCheckedChange={(value) => field.onChange(value === true)}
-        onBlur={field.onBlur}
-        name={field.name}
-        ref={field.ref}
+        checked={input.value === true}
+        onCheckedChange={(value) => input.onChange(value === true)}
+        onBlur={input.onBlur}
+        name={input.name}
+        ref={inputRef}
         disabled={busy}
       />
     )
@@ -246,9 +249,9 @@ function ActionControl({
     return (
       <NativeSelect
         {...controlProps}
-        value={String(field.value)}
+        value={String(input.value)}
         onChange={(event) => {
-          field.onChange(event)
+          input.onChange(event)
           const updates = definition.options?.find(
             (option) => option.value === event.target.value
           )?.updates
@@ -256,9 +259,9 @@ function ActionControl({
             setValue(name, value, { shouldValidate: true })
           }
         }}
-        onBlur={field.onBlur}
-        name={field.name}
-        ref={field.ref}
+        onBlur={input.onBlur}
+        name={input.name}
+        ref={inputRef}
         disabled={busy}
       >
         <NativeSelectOption value=''>
@@ -294,19 +297,20 @@ function ActionControl({
             void file
               .text()
               .then((text) => {
-                if (sequence === fileRead.current) field.onChange(text)
+                if (sequence === fileRead.current) input.onChange(text)
               })
               .catch((error: unknown) => handleServerError(error))
           }}
         />
         <Textarea
           {...controlProps}
-          {...field}
+          {...input}
+          ref={inputRef}
           onChange={(event) => {
             fileRead.current += 1
-            field.onChange(event)
+            input.onChange(event)
           }}
-          value={String(field.value)}
+          value={String(input.value)}
           maxLength={49152}
           disabled={busy}
           className='min-h-48 font-mono text-xs'
@@ -318,8 +322,9 @@ function ActionControl({
     return (
       <Textarea
         {...controlProps}
-        {...field}
-        value={String(field.value)}
+        {...input}
+        ref={inputRef}
+        value={String(input.value)}
         maxLength={definition.max ?? 255}
         disabled={busy}
       />
@@ -328,8 +333,9 @@ function ActionControl({
   return (
     <Input
       {...controlProps}
-      {...field}
-      value={String(field.value)}
+      {...input}
+      ref={inputRef}
+      value={String(input.value)}
       placeholder={definition.placeholder}
       type={definition.kind === 'datetime' ? 'datetime-local' : 'text'}
       inputMode={

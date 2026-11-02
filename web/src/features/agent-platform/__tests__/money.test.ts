@@ -19,14 +19,41 @@ For commercial licensing, please contact support@quantumnous.com
 import { describe, expect, it } from 'vitest'
 
 import { toIntlLocale } from '@/i18n/languages'
+import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import {
   formatMinorMoney,
   minorMoneyInput,
   parseMinorMoney,
+  parseAgentQuota,
+  formatAgentCash,
+  formatAgentQuota,
 } from '../lib/money'
 
 describe('original-currency money', () => {
+  it('agent face values and CNY debt ignore the wallet display exchange rate', () => {
+    const previous = useSystemConfigStore.getState().config
+    try {
+      useSystemConfigStore.getState().setConfig({
+        currency: {
+          displayInCurrency: true,
+          customCurrencySymbol: 'X',
+          customCurrencyExchangeRate: 7.3,
+          quotaDisplayType: 'CNY',
+          quotaPerUnit: 500_000,
+          usdExchangeRate: 7.3,
+        },
+      })
+      expect(parseAgentQuota('100.01')).toBe(50_005_000)
+      expect(parseAgentQuota('9.05')).toBe(4_525_000)
+      expect(formatAgentCash(4_525_000)).toBe('¥9.05')
+      expect(formatAgentQuota(50_005_000)).toBe('$100.01')
+      expect(parseAgentQuota('100.001')).toBeNull()
+      expect(parseAgentQuota('9007199254740992')).toBeNull()
+    } finally {
+      useSystemConfigStore.getState().setConfig(previous)
+    }
+  })
   it('parses cents without binary rounding and retains int64 precision', () => {
     expect(parseMinorMoney('0.29', 2)).toBe('29')
     expect(parseMinorMoney('92233720368547758.07', 2)).toBe(

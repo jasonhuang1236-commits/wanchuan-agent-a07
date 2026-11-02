@@ -20,16 +20,27 @@ import { useTranslation } from 'react-i18next'
 import { Dialog } from '@/components/dialog'
 import { ErrorState } from '@/components/error-state'
 import { LoadingState } from '@/components/loading-state'
+import { getCurrencyDisplay } from '@/lib/currency'
 import { submitPaymentForm } from '@/lib/payment-form'
 
+import { useRequestId } from '../hooks/use-request-id'
+import { parseMinorMoney } from '../lib/money'
 import { getSimplePaymentMethods, requestSimpleRecharge } from '../simple-api'
 import { ActionForm, type ActionField } from './action-form'
 
-export function SimpleRechargeForm(props: { onClose: () => void }) {
+export function SimpleRechargeForm(props: {
+  kind?: 'recharge' | 'repayment'
+  amountDue?: number
+  onClose: () => void
+}) {
   const { t } = useTranslation()
+  const identify = useRequestId()
+  const kind = props.kind ?? 'recharge'
+  const title =
+    kind === 'repayment' ? t('Repay amount due') : t('Recharge agent balance')
   const info = useQuery({
-    queryKey: ['agent-platform', 'simple-recharge-info'],
-    queryFn: getSimplePaymentMethods,
+    queryKey: ['agent-platform', 'simple-recharge-info', kind],
+    queryFn: () => getSimplePaymentMethods(kind),
   })
 
   if (info.isPending) return <LoadingState />
@@ -37,7 +48,7 @@ export function SimpleRechargeForm(props: { onClose: () => void }) {
     return (
       <Dialog
         open
-        title={t('Recharge agent balance')}
+        title={title}
         onOpenChange={(open) => {
           if (!open) props.onClose()
         }}
@@ -54,12 +65,23 @@ export function SimpleRechargeForm(props: { onClose: () => void }) {
   const fields: ActionField[] = [
     {
       name: 'amount',
-      label: 'Agent balance to add ($)',
-      kind: 'integer',
-      min: 1,
-      max: Number.MAX_SAFE_INTEGER,
+      label:
+        kind === 'repayment'
+          ? 'Repayment amount (CNY)'
+          : 'Agent balance to add ($)',
+      kind: 'text',
+      max: 24,
+      validate: (value) => {
+        const minor = parseMinorMoney(String(value), 2)
+        if (!minor || BigInt(minor) > 9007199254740991n) {
+          return t('Enter a positive amount with at most two decimal places.')
+        }
+        return undefined
+      },
       description:
-        'The agent balance is credited at a 10% discount after payment succeeds.',
+        kind === 'repayment'
+          ? 'Pay the actual amount due in CNY. Any concurrent overpayment is preserved in your agent balance.'
+          : 'Pay 90% of the face value. Existing debt is repaid first; the remaining payment funds agent balance.',
     },
     {
       name: 'payment_method',
@@ -76,7 +98,7 @@ export function SimpleRechargeForm(props: { onClose: () => void }) {
     return (
       <Dialog
         open
-        title={t('Recharge agent balance')}
+        title={title}
         description={t('No compatible online payment method is configured.')}
         onOpenChange={(open) => {
           if (!open) props.onClose()
@@ -91,17 +113,30 @@ export function SimpleRechargeForm(props: { onClose: () => void }) {
 
   return (
     <ActionForm
-      title={t('Recharge agent balance')}
+      title={title}
       description={t(
-        'This payment is separate from your ordinary wallet. A successful payment adds the full agent balance shown above.'
+        'This payment is separate from your ordinary wallet and does not earn referral rewards.'
       )}
       fields={fields}
-      initial={{ payment_method: methods[0].type }}
+      initial={{
+        payment_method: methods[0].type,
+        amount:
+          kind === 'repayment' && props.amountDue
+            ? (
+                props.amountDue / getCurrencyDisplay().config.quotaPerUnit
+              ).toFixed(2)
+            : '',
+      }}
       onClose={props.onClose}
       onSubmit={async (values) => {
-        const result = await requestSimpleRecharge({
-          amount: Number(values.amount),
+        const payload = {
+          amount: String(values.amount),
+          kind,
           payment_method: String(values.payment_method),
+        }
+        const result = await requestSimpleRecharge({
+          request_id: identify(payload),
+          ...payload,
         })
         submitPaymentForm(result.url, result.data)
         props.onClose()

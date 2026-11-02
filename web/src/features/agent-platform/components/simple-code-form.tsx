@@ -24,8 +24,12 @@ import { Dialog } from '@/components/dialog'
 import { Button } from '@/components/ui/button'
 import { useRequestId } from '@/features/agent-platform/hooks/use-request-id'
 import type { Redemption } from '@/features/redemption-codes/types'
-import { formatQuota, parseQuotaFromDollars } from '@/lib/format'
 
+import {
+  formatAgentCash,
+  formatAgentQuota as formatQuota,
+  parseAgentQuota,
+} from '../lib/money'
 import { createSimpleCode, type SimpleAgentBalance } from '../simple-api'
 import { ActionForm, type ActionField } from './action-form'
 
@@ -39,7 +43,15 @@ export function SimpleCodeForm(props: {
   const [created, setCreated] = useState<Redemption | null>(null)
   const fields: ActionField[] = [
     { name: 'name', label: 'Name', kind: 'text', max: 80 },
-    { name: 'quota', label: 'Quota', kind: 'integer', min: 1 },
+    {
+      name: 'quota',
+      label: 'Quota',
+      kind: 'text',
+      validate: (value) =>
+        (parseAgentQuota(String(value)) ?? 0) > 0
+          ? undefined
+          : t('Enter a valid amount'),
+    },
   ]
   if (created) {
     return (
@@ -78,7 +90,7 @@ export function SimpleCodeForm(props: {
       fields={fields}
       onClose={props.onClose}
       onSubmit={async (values) => {
-        const quota = parseQuotaFromDollars(Number(values.quota))
+        const quota = parseAgentQuota(String(values.quota)) ?? 0
         if (!Number.isSafeInteger(quota) || quota <= 0) {
           throw new Error(t('Invalid redemption code request'))
         }
@@ -111,7 +123,7 @@ export function SimpleCodeForm(props: {
         </div>
         <div className='mt-3 font-medium'>{t('Available credit')}</div>
         <div className='mt-1 tabular-nums'>
-          {formatQuota(props.balance.available_credit_quota)}
+          {formatAgentCash(props.balance.available_credit_quota)}
         </div>
       </div>
     </ActionForm>

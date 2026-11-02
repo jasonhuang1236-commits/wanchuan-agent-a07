@@ -45,13 +45,14 @@ import { getRedemptions } from '@/features/redemption-codes/api'
 import { REDEMPTION_STATUSES } from '@/features/redemption-codes/constants'
 import { isRedemptionExpired } from '@/features/redemption-codes/lib'
 import type { Redemption } from '@/features/redemption-codes/types'
-import { formatQuota, formatTimestampToDate } from '@/lib/format'
+import { formatTimestampToDate } from '@/lib/format'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { getPlatform } from './api'
 import { SimpleCodeForm } from './components/simple-code-form'
 import { SimplePaymentForm } from './components/simple-payment-form'
 import { SimpleRechargeForm } from './components/simple-recharge-form'
+import { formatAgentCash, formatAgentQuota as formatQuota } from './lib/money'
 import { getSimpleAgentBalance } from './simple-api'
 import type { PlatformSelf } from './types'
 
@@ -85,6 +86,7 @@ export function AgentPortal() {
   const RewardsPanel = extensionWalletPage().referralPanel
   const [simpleCodeOpen, setSimpleCodeOpen] = useState(false)
   const [simpleRechargeOpen, setSimpleRechargeOpen] = useState(false)
+  const [repaymentOpen, setRepaymentOpen] = useState(false)
   const [simplePaymentOpen, setSimplePaymentOpen] = useState(false)
 
   if (self.isPending || balance.isPending) {
@@ -160,11 +162,11 @@ export function AgentPortal() {
                     />
                     <Metric
                       label={t('Available credit')}
-                      value={formatQuota(account.available_credit_quota)}
+                      value={formatAgentCash(account.available_credit_quota)}
                     />
                     <Metric
                       label={t('Amount due')}
-                      value={formatQuota(account.amount_due_quota)}
+                      value={formatAgentCash(account.amount_due_quota)}
                     />
                     <Metric
                       label={t('Payment income available')}
@@ -175,6 +177,7 @@ export function AgentPortal() {
                     <Button
                       className='bg-white text-sky-950 hover:bg-sky-100'
                       onClick={() => setSimpleCodeOpen(true)}
+                      disabled={account.status !== 'active'}
                     >
                       <Ticket className='size-4' />
                       {t('Issue directly')}
@@ -183,6 +186,7 @@ export function AgentPortal() {
                       className='border-white/25 bg-transparent text-white hover:bg-white/10'
                       variant='outline'
                       onClick={() => setSimpleRechargeOpen(true)}
+                      disabled={account.status !== 'active'}
                     >
                       <CircleDollarSign className='size-4' />
                       {t('Recharge agent balance')}
@@ -190,12 +194,35 @@ export function AgentPortal() {
                     <Button
                       className='border-white/25 bg-transparent text-white hover:bg-white/10'
                       variant='outline'
+                      disabled={
+                        account.amount_due_quota <= 0 ||
+                        account.status === 'cancelled'
+                      }
+                      onClick={() => setRepaymentOpen(true)}
+                    >
+                      {t('Repay amount due')}
+                    </Button>
+                    <Button
+                      className='border-white/25 bg-transparent text-white hover:bg-white/10'
+                      variant='outline'
                       onClick={() => setSimplePaymentOpen(true)}
+                      disabled={account.status !== 'active'}
                     >
                       <HandCoins className='size-4' />
                       {t('Generate customer payment code')}
                     </Button>
                   </div>
+                  {(account.overdue_quota ?? 0) > 0 && (
+                    <p
+                      role='status'
+                      className='rounded-md border border-amber-200/40 bg-amber-50/10 p-3 text-sm text-amber-100'
+                    >
+                      {t(
+                        'Overdue amount: {{amount}}. Please repay or contact support.',
+                        { amount: formatAgentCash(account.overdue_quota ?? 0) }
+                      )}
+                    </p>
+                  )}
                   <p className='text-xs text-sky-100/70'>
                     {t(
                       'Direct codes use agent balance or credit. Customer payment codes do not use agent balance; their profit is frozen for five days.'
@@ -246,9 +273,11 @@ export function AgentPortal() {
                   <div className='flex items-center justify-between'>
                     <span className='text-muted-foreground'>{t('Status')}</span>
                     <span className='font-medium'>
-                      {self.data.profile?.status === 'active'
-                        ? t('Active')
-                        : t('Paused')}
+                      {{
+                        active: t('Active'),
+                        cancelled: t('Cancelled'),
+                        paused: t('Paused'),
+                      }[account.status] ?? account.status}
                     </span>
                   </div>
                   <Link
@@ -273,6 +302,13 @@ export function AgentPortal() {
       )}
       {simpleRechargeOpen && (
         <SimpleRechargeForm onClose={() => setSimpleRechargeOpen(false)} />
+      )}
+      {repaymentOpen && (
+        <SimpleRechargeForm
+          kind='repayment'
+          amountDue={account.amount_due_quota}
+          onClose={() => setRepaymentOpen(false)}
+        />
       )}
       {simplePaymentOpen && (
         <SimplePaymentForm onClose={() => setSimplePaymentOpen(false)} />

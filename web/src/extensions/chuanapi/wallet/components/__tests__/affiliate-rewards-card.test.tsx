@@ -98,15 +98,13 @@ describe('affiliate rewards card', () => {
     expect(
       screen.getByRole('button', { name: 'Copy referral link' })
     ).toBeInTheDocument()
-    expect(screen.getByText('Pending Rewards')).toBeInTheDocument()
-    expect(screen.getByText('Total Rewards')).toBeInTheDocument()
+    expect(screen.getByText('Referral Rewards Available')).toBeInTheDocument()
+    expect(screen.getByText('Cumulative referral rewards')).toBeInTheDocument()
     expect(screen.getByText('Invited Users')).toBeInTheDocument()
     expect(screen.getByText('2')).toBeInTheDocument()
 
     expect(
-      screen.getByText(
-        /For the first 3 recharges of an invited friend, you will receive 5\.0% of the recharge amount as a reward\./
-      )
+      screen.getByText(/Earn 5\.0% from every qualifying top-up, with no cap\./)
     ).toBeInTheDocument()
   })
 
@@ -136,9 +134,7 @@ describe('affiliate rewards card', () => {
     renderCard({ referralRate: 0.0333 })
 
     expect(
-      screen.getByText(
-        /you will receive 3\.33% of the recharge amount as a reward/
-      )
+      screen.getByText(/Earn 3\.33% from every qualifying top-up, with no cap/)
     ).toBeInTheDocument()
   })
 
@@ -146,7 +142,7 @@ describe('affiliate rewards card', () => {
     renderCard({ referralRate: 0 })
 
     expect(
-      screen.getByText(/you will receive 0% of the recharge amount/)
+      screen.getByText(/Earn 0% from every qualifying top-up/)
     ).toBeInTheDocument()
   })
 
@@ -171,7 +167,7 @@ describe('affiliate rewards card', () => {
   })
 
   test('hides the transfer button when there are no pending rewards', () => {
-    renderCard({ user: { ...user, aff_quota: 0 } })
+    renderCard({ user: { ...user, aff_quota: 0 }, availableQuota: 0 })
 
     expect(
       screen.queryByRole('button', { name: 'Transfer to Balance' })

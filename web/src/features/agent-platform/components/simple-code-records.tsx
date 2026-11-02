@@ -26,13 +26,14 @@ import { LoadingState } from '@/components/loading-state'
 import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
-import { formatQuota, formatTimestampToDate } from '@/lib/format'
+import { formatTimestampToDate } from '@/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { postPlatform } from '../api'
 import { useRequestId } from '../hooks/use-request-id'
+import { formatAgentQuota as formatQuota } from '../lib/money'
 import {
   cancelSimpleCode,
   getSimpleAgentCodes,

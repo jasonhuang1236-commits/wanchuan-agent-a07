@@ -133,6 +133,7 @@ export function AgentPaymentPage(props: { publicID: string }) {
     )
   } else if (
     query.data.status === 'expired' ||
+    query.data.status === 'closed' ||
     query.data.status === 'refunded'
   ) {
     content = (
@@ -165,7 +166,7 @@ export function AgentPaymentPage(props: { publicID: string }) {
             {paying
               ? t('Opening payment...')
               : t('Pay {{amount}}', {
-                  amount: `$${(query.data.sale_price_fen / 100).toFixed(2)}`,
+                  amount: `¥${(query.data.sale_price_fen / 100).toFixed(2)}`,
                 })}
           </Button>
         </CardContent>

@@ -29,7 +29,8 @@ func simpleAccountingPayment(t *testing.T, identity AuthSessionIdentity, referen
 	t.Helper()
 	order, err := CreateAgentSimplePaymentOrder(identity, AgentSimplePaymentRequest{RequestID: reference, Name: reference, Quota: 500_000, SalePriceFen: price, PaymentMethod: "alipay"}, reference, reference+"-synthetic-payment-link-token-000000000000", reference, "https://pay.example.test", `{}`, "https://example.test")
 	require.NoError(t, err)
-	_, err = SettleAgentSimplePaymentByTradeNo(reference, "alipay", fmt.Sprintf("%d.%02d", price/100, price%100))
+	amount := fmt.Sprintf("%d.%02d", price/100, price%100)
+	_, err = SettleAgentSimplePaymentByTradeNo(reference, "alipay", amount, simpleVerifiedEpayFacts(t, reference, amount))
 	require.NoError(t, err)
 	return order
 }
@@ -65,16 +66,16 @@ func TestAgentSimpleRefundedPaymentAcknowledgesOriginalSuccessWithoutRecredit(t 
 	err := RefundAgentSimplePayment(root, AgentSimplePaymentRefundCommand{RequestID: "a07-refunded-replay-refund", OrderID: order.ID, Reason: "Synthetic customer refund", Evidence: "Synthetic refund receipt"})
 	require.NoError(t, err)
 	for range 2 {
-		done, err := SettleAgentSimplePaymentByTradeNo(order.TradeNo, "alipay", "1.20")
+		done, err := SettleAgentSimplePaymentByTradeNo(order.TradeNo, "alipay", "1.20", simpleVerifiedEpayFacts(t, order.TradeNo, "1.20"))
 		require.NoError(t, err)
 		assert.True(t, done)
 		require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
-			done, err = SettleAgentSimplePaymentCallbackTx(tx, order.TradeNo, "alipay", "1.20", common.GetTimestamp())
+			done, err = SettleAgentSimplePaymentCallbackTx(tx, order.TradeNo, "alipay", "1.20", common.GetTimestamp(), simpleVerifiedEpayFacts(t, order.TradeNo, "1.20"))
 			assert.True(t, done)
 			return err
 		}))
 	}
-	_, err = SettleAgentSimplePaymentByTradeNo(order.TradeNo, "alipay", "1.19")
+	_, err = SettleAgentSimplePaymentByTradeNo(order.TradeNo, "alipay", "1.19", simpleVerifiedEpayFacts(t, order.TradeNo, "1.19"))
 	require.ErrorIs(t, err, ErrPaymentAmountMismatch)
 	var stored AgentSimplePaymentOrder
 	require.NoError(t, DB.First(&stored, order.ID).Error)
@@ -161,7 +162,7 @@ func TestAgentSimpleLateVerifiedPaymentIsDeliveredAfterLinkExpiry(t *testing.T) 
 	require.NoError(t, DB.Model(&AgentSimplePaymentOrder{}).Where("id = ?", order.ID).Update("expires_at", common.GetTimestamp()-1).Error)
 	_, err = ExpireAgentSimplePaymentOrders(context.Background(), 100)
 	require.NoError(t, err)
-	_, err = SettleAgentSimplePaymentByTradeNo("a07-late-trade", "alipay", "1.20")
+	_, err = SettleAgentSimplePaymentByTradeNo("a07-late-trade", "alipay", "1.20", simpleVerifiedEpayFacts(t, "a07-late-trade", "1.20"))
 	require.NoError(t, err, "a verified customer payment must remain recoverable after local link expiry")
 	var stored AgentSimplePaymentOrder
 	require.NoError(t, DB.First(&stored, order.ID).Error)
@@ -247,7 +248,7 @@ func TestAgentSimpleRechargeRepaysDiscountedDebtBeforeAddingCashQuota(t *testing
 	require.NoError(t, DB.Create(&AgentSimpleCreditDebt{AgentUserID: agent.UserID, CodeID: 999, Quota: 45_000_000}).Error)
 	require.NoError(t, DB.Create(&TopUp{AgentSimpleTopUp: true, UserId: agent.UserID, Amount: 200, Money: 180, TradeNo: "A07-REPAY-FIRST", PaymentMethod: "alipay", PaymentProvider: PaymentProviderEpay, Status: common.TopUpStatusPending}).Error)
 	for range 2 {
-		_, err := RechargeEpay("A07-REPAY-FIRST", "alipay", "180.00", "")
+		_, err := RechargeEpay("A07-REPAY-FIRST", "alipay", "180.00", "", simpleVerifiedEpayFacts(t, "A07-REPAY-FIRST", "180.00"))
 		require.NoError(t, err)
 	}
 	var account AgentSimpleAccount

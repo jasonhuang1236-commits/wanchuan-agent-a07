@@ -145,33 +145,34 @@ func (*AgentSimpleCodeAllocation) BeforeDelete(*gorm.DB) error { return ErrAgent
 // normal redemption code only after the payment callback is verified; before
 // then it consumes neither agent balance nor credit.
 type AgentSimplePaymentOrder struct {
-	ID              int64  `json:"id" gorm:"primaryKey"`
-	RequestKey      string `json:"-" gorm:"type:varchar(128);not null;uniqueIndex"`
-	PublicID        string `json:"public_id" gorm:"type:varchar(36);not null;uniqueIndex"`
-	TokenHash       string `json:"-" gorm:"type:char(64);not null;uniqueIndex"`
-	TokenCipher     string `json:"-" gorm:"type:text;not null"`
-	AgentUserID     int    `json:"agent_user_id" gorm:"not null;index"`
-	Name            string `json:"name" gorm:"type:varchar(80);not null"`
-	Quota           int64  `json:"quota" gorm:"type:bigint;not null"`
-	SalePriceFen    int64  `json:"sale_price_fen" gorm:"not null"`
-	CostPriceFen    int64  `json:"cost_price_fen" gorm:"not null"`
-	FeeFen          int64  `json:"fee_fen" gorm:"not null"`
-	ProfitQuota     int64  `json:"profit_quota" gorm:"type:bigint;not null"`
-	PaymentMethod   string `json:"payment_method" gorm:"type:varchar(50);not null"`
-	PaymentProvider string `json:"payment_provider" gorm:"type:varchar(50);not null"`
-	TradeNo         string `json:"trade_no" gorm:"type:varchar(255);not null;uniqueIndex"`
-	PaymentURL      string `json:"-" gorm:"type:text;not null"`
-	PaymentParams   string `json:"-" gorm:"type:text;not null"`
-	Status          string `json:"status" gorm:"type:varchar(16);not null;index"`
-	ExpiresAt       int64  `json:"expires_at" gorm:"not null;index"`
-	MaturesAt       int64  `json:"matures_at" gorm:"not null;index"`
-	PaidAt          int64  `json:"paid_at" gorm:"not null"`
-	DeliveredAt     int64  `json:"delivered_at" gorm:"not null"`
-	RefundedAt      int64  `json:"refunded_at" gorm:"not null"`
-	RefundReason    string `json:"refund_reason" gorm:"type:varchar(255);not null"`
-	RedemptionID    int    `json:"redemption_id" gorm:"not null;index"`
-	ProfitMatured   bool   `json:"profit_matured" gorm:"not null"`
-	CreatedAt       int64  `json:"created_at" gorm:"autoCreateTime;index"`
+	ID               int64  `json:"id" gorm:"primaryKey"`
+	RequestKey       string `json:"-" gorm:"type:varchar(128);not null;uniqueIndex"`
+	PublicID         string `json:"public_id" gorm:"type:varchar(36);not null;uniqueIndex"`
+	TokenHash        string `json:"-" gorm:"type:char(64);not null;uniqueIndex"`
+	TokenCipher      string `json:"-" gorm:"type:text;not null"`
+	AgentUserID      int    `json:"agent_user_id" gorm:"not null;index"`
+	Name             string `json:"name" gorm:"type:varchar(80);not null"`
+	Quota            int64  `json:"quota" gorm:"type:bigint;not null"`
+	SalePriceFen     int64  `json:"sale_price_fen" gorm:"not null"`
+	CostPriceFen     int64  `json:"cost_price_fen" gorm:"not null"`
+	FeeFen           int64  `json:"fee_fen" gorm:"not null"`
+	ProfitQuota      int64  `json:"profit_quota" gorm:"type:bigint;not null"`
+	PaymentMethod    string `json:"payment_method" gorm:"type:varchar(50);not null"`
+	PaymentProvider  string `json:"payment_provider" gorm:"type:varchar(50);not null"`
+	TradeNo          string `json:"trade_no" gorm:"type:varchar(255);not null;uniqueIndex"`
+	PaymentReceiptID int64  `json:"-" gorm:"type:bigint;not null;default:0"`
+	PaymentURL       string `json:"-" gorm:"type:text;not null"`
+	PaymentParams    string `json:"-" gorm:"type:text;not null"`
+	Status           string `json:"status" gorm:"type:varchar(16);not null;index"`
+	ExpiresAt        int64  `json:"expires_at" gorm:"not null;index"`
+	MaturesAt        int64  `json:"matures_at" gorm:"not null;index"`
+	PaidAt           int64  `json:"paid_at" gorm:"not null"`
+	DeliveredAt      int64  `json:"delivered_at" gorm:"not null"`
+	RefundedAt       int64  `json:"refunded_at" gorm:"not null"`
+	RefundReason     string `json:"refund_reason" gorm:"type:varchar(255);not null"`
+	RedemptionID     int    `json:"redemption_id" gorm:"not null;index"`
+	ProfitMatured    bool   `json:"profit_matured" gorm:"not null"`
+	CreatedAt        int64  `json:"created_at" gorm:"autoCreateTime;index"`
 }
 
 func (*AgentSimplePaymentOrder) BeforeDelete(*gorm.DB) error { return ErrAgentSimpleImmutable }
@@ -305,6 +306,7 @@ type AgentSimpleStatusRequest struct {
 }
 
 type AgentSimpleAccountView struct {
+	OverdueQuota            int64  `json:"overdue_quota"`
 	AgentUserID             int    `json:"agent_user_id"`
 	Status                  string `json:"status"`
 	CashQuota               int64  `json:"cash_quota"`
@@ -538,7 +540,7 @@ func lockAgentSimplePaymentFeeTx(tx *gorm.DB, paymentMethod string) (*AgentSimpl
 	if strings.TrimSpace(paymentMethod) == "" || len(paymentMethod) > 50 {
 		return nil, ErrAgentSimpleInvalid
 	}
-	seed := AgentSimplePaymentFee{PaymentMethod: paymentMethod, Enabled: true, Version: 1}
+	seed := AgentSimplePaymentFee{PaymentMethod: paymentMethod, Version: 1}
 	if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&seed).Error; err != nil {
 		return nil, err
 	}
@@ -616,6 +618,13 @@ func ListAgentSimplePaymentFees(identity AuthSessionIdentity) ([]AgentSimplePaym
 		if err := requireAgentSimpleRootTx(tx, identity); err != nil {
 			return err
 		}
+		for _, method := range operation_setting.PayMethods {
+			if isSimpleEpayMethod(method["type"]) && method["type"] != "" {
+				if _, err := lockAgentSimplePaymentFeeTxIncludingDisabled(tx, method["type"]); err != nil {
+					return err
+				}
+			}
+		}
 		return tx.Order("payment_method ASC").Find(&rows).Error
 	})
 	return rows, err
@@ -677,25 +686,47 @@ func UpdateAgentSimplePaymentFee(identity AuthSessionIdentity, request AgentSimp
 	return &result, err
 }
 
-func GetAgentSimpleAvailablePaymentMethods(identity AuthSessionIdentity) ([]AgentSimplePaymentFee, error) {
+func GetAgentSimpleAvailablePaymentMethods(identity AuthSessionIdentity, purpose string) ([]AgentSimplePaymentFee, error) {
 	if identity.UserID <= 0 {
 		return nil, ErrAgentSimplePermission
 	}
-	var fees []AgentSimplePaymentFee
+	if purpose == "" {
+		purpose = "payment"
+	}
+	if purpose != "payment" && purpose != "recharge" && purpose != "repayment" {
+		return nil, ErrAgentSimpleInvalid
+	}
+	fees := make([]AgentSimplePaymentFee, 0)
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		if err := requireAgentSimpleSalesTx(tx, identity, identity.UserID); err != nil {
-			return err
+		if purpose == "repayment" {
+			if err := requireAgentSimpleHistoryTx(tx, identity, identity.UserID); err != nil {
+				return err
+			}
+			account, err := lockAgentSimpleAccountTx(tx, identity.UserID, false)
+			if err != nil || account.Status == AgentSimpleStatusCancelled {
+				return ErrAgentSimpleUnavailable
+			}
+		} else {
+			if err := requireAgentSimpleSalesTx(tx, identity, identity.UserID); err != nil {
+				return err
+			}
 		}
 		for _, configured := range operation_setting.PayMethods {
 			method := configured["type"]
 			if method == "" || !operation_setting.ContainsPayMethod(method) || !isSimpleEpayMethod(method) {
 				continue
 			}
-			fee, err := lockAgentSimplePaymentFeeTx(tx, method)
+			if purpose != "payment" {
+				fees = append(fees, AgentSimplePaymentFee{PaymentMethod: method, Enabled: true})
+				continue
+			}
+			fee, err := lockAgentSimplePaymentFeeTxIncludingDisabled(tx, method)
 			if err != nil {
 				return err
 			}
-			fees = append(fees, *fee)
+			if fee.Enabled {
+				fees = append(fees, *fee)
+			}
 		}
 		return nil
 	})
@@ -775,48 +806,17 @@ func GetAgentSimplePublicPayment(publicID, token string) (*AgentSimplePublicPaym
 // SettleAgentSimplePaymentByTradeNo is called only after the payment provider
 // signature has been verified by the host webhook. It keeps customer payment
 // settlement separate from the ordinary wallet top-up path.
-func SettleAgentSimplePaymentByTradeNo(tradeNo, paymentMethod, callbackMoney string) (bool, error) {
-	if strings.TrimSpace(tradeNo) == "" || strings.TrimSpace(callbackMoney) == "" {
-		return false, ErrAgentSimpleInvalid
-	}
-	callback, err := decimal.NewFromString(strings.TrimSpace(callbackMoney))
-	if err != nil || callback.LessThanOrEqual(decimal.Zero) || !callback.Equal(callback.Round(2)) {
-		return false, ErrPaymentAmountMismatch
-	}
+func SettleAgentSimplePaymentByTradeNo(tradeNo, paymentMethod, callbackMoney string, facts ...AgentVerifiedPaymentFacts) (bool, error) {
 	var result bool
-	err = DB.Transaction(func(tx *gorm.DB) error {
-		var order AgentSimplePaymentOrder
-		if err := lockForUpdate(tx).Where("trade_no = ?", tradeNo).First(&order).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrAgentSimplePaymentNotFound
-			}
-			return err
-		}
-		if order.PaymentProvider != PaymentProviderEpay || (paymentMethod != "" && order.PaymentMethod != paymentMethod) {
-			return ErrPaymentMethodMismatch
-		}
-		expected := decimal.NewFromInt(order.SalePriceFen).Div(decimal.NewFromInt(100))
-		if !callback.Equal(expected) {
-			return ErrPaymentAmountMismatch
-		}
-		if order.Status == AgentSimplePaymentPaid || order.Status == AgentSimplePaymentRedeemed || order.Status == AgentSimplePaymentRefunded {
-			result = true
-			return nil
-		}
-		if order.Status != AgentSimplePaymentPending && order.Status != AgentSimplePaymentExpired && order.Status != AgentSimplePaymentClosed {
-			return ErrTopUpStatusInvalid
-		}
-		_, err := settleAgentSimplePaymentTx(tx, order.ID, 0, common.GetTimestamp())
-		if err != nil {
-			return err
-		}
-		result = false
-		return nil
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var err error
+		result, err = SettleAgentSimplePaymentCallbackTx(tx, tradeNo, paymentMethod, callbackMoney, common.GetTimestamp(), facts...)
+		return err
 	})
 	return result, err
 }
 
-func SettleAgentSimplePaymentCallbackTx(tx *gorm.DB, tradeNo, paymentMethod, callbackMoney string, paidAt int64) (bool, error) {
+func SettleAgentSimplePaymentCallbackTx(tx *gorm.DB, tradeNo, paymentMethod, callbackMoney string, paidAt int64, facts ...AgentVerifiedPaymentFacts) (bool, error) {
 	if tx == nil || strings.TrimSpace(tradeNo) == "" || strings.TrimSpace(callbackMoney) == "" || paidAt <= 0 {
 		return false, ErrAgentSimpleInvalid
 	}
@@ -831,12 +831,28 @@ func SettleAgentSimplePaymentCallbackTx(tx *gorm.DB, tradeNo, paymentMethod, cal
 		}
 		return false, err
 	}
-	if order.PaymentProvider != PaymentProviderEpay || (paymentMethod != "" && order.PaymentMethod != paymentMethod) {
+	if order.PaymentProvider != PaymentProviderEpay || order.PaymentMethod != paymentMethod {
 		return false, ErrPaymentMethodMismatch
 	}
 	expected := decimal.NewFromInt(order.SalePriceFen).Div(decimal.NewFromInt(100))
 	if !callback.Equal(expected) {
 		return false, ErrPaymentAmountMismatch
+	}
+	if len(facts) != 1 || facts[0].Provider != PaymentProviderEpay || facts[0].Currency != "CNY" || facts[0].CurrencyExponent != 2 || facts[0].PaidMinor != order.SalePriceFen {
+		return false, ErrAgentPaymentReceiptConflict
+	}
+	f := facts[0]
+	receipt, err := ClaimAgentPaymentReceiptTx(tx, &AgentPaymentReceipt{Provider: f.Provider, ProviderReference: f.ExternalReference, MerchantScope: f.MerchantScope, Environment: f.Environment, Purpose: "payment_code", LocalOrderKey: order.TradeNo, OwnerUserID: order.AgentUserID, Currency: f.Currency, CurrencyExponent: f.CurrencyExponent, PaidMinor: f.PaidMinor, PaidAt: paidAt, VerifiedAt: common.GetTimestamp()})
+	if err != nil {
+		return false, err
+	}
+	if order.PaymentReceiptID != 0 && order.PaymentReceiptID != receipt.ID {
+		return false, ErrAgentPaymentReceiptConflict
+	}
+	if order.PaymentReceiptID == 0 {
+		if err := tx.Model(&order).Update("payment_receipt_id", receipt.ID).Error; err != nil {
+			return false, err
+		}
 	}
 	if order.Status == AgentSimplePaymentPaid || order.Status == AgentSimplePaymentRedeemed || order.Status == AgentSimplePaymentRefunded {
 		return true, nil
@@ -1631,16 +1647,13 @@ func creditAgentSimpleCashTx(tx *gorm.DB, agentID, actorID int, quota, paidQuota
 	if err != nil {
 		return err
 	}
-	if account.Status == AgentSimpleStatusCancelled {
-		return ErrAgentSimpleUnavailable
-	}
 	before := *account
 	repayment := min(account.CreditOutstandingQuota, paidQuota)
 	if err := applyAgentSimpleRepaymentTx(tx, account, repayment); err != nil {
 		return err
 	}
 	remaining, err := common.WalletQuotaFromDecimalStrict(
-		decimal.NewFromInt(paidQuota - repayment).Mul(decimal.NewFromInt(10)).Div(decimal.NewFromInt(9)).Truncate(0),
+		decimal.NewFromInt(quota).Mul(decimal.NewFromInt(paidQuota - repayment)).Div(decimal.NewFromInt(paidQuota)).Truncate(0),
 	)
 	if err != nil || simpleAvailableQuota(account) > int64(common.MaxWalletQuota)-int64(remaining) {
 		return ErrWalletQuotaLimitExceeded
@@ -1772,6 +1785,9 @@ func GetAgentSimpleAccount(identity AuthSessionIdentity, agentID int) (*AgentSim
 			return err
 		}
 		view.ReservedQuota = reserved
+		if err := tx.Model(&AgentSimpleBill{}).Where("agent_user_id = ? AND due_at <= ?", agentID, common.GetTimestamp()).Select("COALESCE(SUM(quota - paid_quota),0)").Scan(&view.OverdueQuota).Error; err != nil {
+			return err
+		}
 		return nil
 	})
 	return &view, err
