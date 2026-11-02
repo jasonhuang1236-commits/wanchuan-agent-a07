@@ -48,6 +48,7 @@ func setupAgentInvitationControllerTest(t *testing.T) []model.User {
 		*operation_setting.GetPaymentSetting() = previousPayment
 	})
 	require.NoError(t, db.AutoMigrate(append([]any{&model.User{}, &model.UserSession{}, &model.AgentInvitation{}, &model.AgentInvitationPolicy{}, &model.AgentInvitationPolicyAudit{}, &model.AgentProfile{}, &model.AgentProfileOperation{}, &model.AgentPolicy{}, &model.AgentPolicyState{}, &model.AgentInvitationPolicyOperation{}, &model.TwoFA{}, &model.PasskeyCredential{}, &model.AuthFlow{}, &model.BalanceLedgerOperation{}, &model.BalanceLedger{}, &model.Log{}}, model.BonusSourceModels()...)...))
+	require.NoError(t, db.AutoMigrate(model.AgentSimpleModels()...))
 	users := []model.User{
 		{Username: "invite-common", Role: common.RoleCommonUser},
 		{Username: "invite-agent-a", Role: common.RoleAgentUser},
@@ -228,7 +229,7 @@ func TestAgentInvitationPasswordRegistrationIgnoresForgedFields(t *testing.T) {
 	require.NoError(t, model.DB.Where("username = ?", "public-invitee").First(&user).Error)
 	assert.Equal(t, common.RoleCommonUser, user.Role)
 	assert.Equal(t, users[1].Id, user.InviterId)
-	assert.Equal(t, 900, user.QuotaBonus)
+	assert.EqualValues(t, 3*common.QuotaPerUnit, user.QuotaBonus)
 	assert.Zero(t, user.QuotaPaid)
 	var invitation model.AgentInvitation
 	require.NoError(t, model.DB.Where("user_id = ?", user.Id).First(&invitation).Error)
@@ -240,6 +241,18 @@ func TestAgentInvitationPasswordRegistrationIgnoresForgedFields(t *testing.T) {
 	var count int64
 	require.NoError(t, model.DB.Model(&model.AgentInvitation{}).Where("user_id = ?", user.Id).Count(&count).Error)
 	assert.EqualValues(t, 1, count)
+	ordinaryBody := fmt.Sprintf(`{"username":"ordinary-invitee","password":"Test-only-password-984!","aff_code":%q}`, users[0].AffCode)
+	response = performAgentInvitationRequest(t, model.User{}, "POST", "/api/user/register", ordinaryBody, Register)
+	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &payload))
+	require.True(t, payload.Success, response.Body.String())
+	var ordinary model.User
+	require.NoError(t, model.DB.Where("username = ?", "ordinary-invitee").First(&ordinary).Error)
+	assert.Zero(t, ordinary.QuotaBonus)
+	assert.Equal(t, users[0].Id, ordinary.InviterId)
+	var ordinaryInvitation model.AgentInvitation
+	require.NoError(t, model.DB.Where("user_id = ?", ordinary.Id).First(&ordinaryInvitation).Error)
+	assert.Zero(t, ordinaryInvitation.BonusQuota)
+	assert.Equal(t, "inviter_not_agent", ordinaryInvitation.BonusReason)
 }
 
 func TestAgentInvitationOAuthFlowGrantsOnlyOnVerifiedNewAccount(t *testing.T) {
@@ -252,6 +265,7 @@ func TestAgentInvitationOAuthFlowGrantsOnlyOnVerifiedNewAccount(t *testing.T) {
 	require.NoError(t, model.DB.Raw("SHOW server_version_num").Scan(&version).Error)
 	require.Equal(t, "180006", version)
 	require.NoError(t, model.DB.AutoMigrate(&model.AgentInvitation{}, &model.AgentInvitationPolicy{}, &model.AgentInvitationPolicyAudit{}, &model.AgentProfile{}, &model.AgentPolicy{}, &model.AgentPolicyState{}))
+	require.NoError(t, model.DB.AutoMigrate(model.AgentSimpleModels()...))
 	require.NoError(t, model.DB.Model(root).Update("role", common.RoleRootUser).Error)
 	agent := model.User{Username: "oauth-agent", AffCode: "oauth-agent-aff", Role: common.RoleAgentUser, Status: common.UserStatusEnabled}
 	require.NoError(t, model.DB.Create(&agent).Error)
@@ -282,7 +296,7 @@ func TestAgentInvitationOAuthFlowGrantsOnlyOnVerifiedNewAccount(t *testing.T) {
 	var user model.User
 	require.NoError(t, model.DB.Where("linux_do_id = ?", "77101").First(&user).Error)
 	assert.Equal(t, agent.Id, user.InviterId)
-	assert.Equal(t, 1500123, user.QuotaBonus)
+	assert.EqualValues(t, 3*common.QuotaPerUnit+1_500_000, user.QuotaBonus)
 	assert.Equal(t, http.StatusForbidden, linuxDOSignupCallback(state, service.AuthIdentity{}).Code)
 	// A fresh, valid login flow carrying a different invitation cannot rewrite
 	// an existing account or earn another test grant.
@@ -294,12 +308,12 @@ func TestAgentInvitationOAuthFlowGrantsOnlyOnVerifiedNewAccount(t *testing.T) {
 	require.True(t, body.Success, response.Body.String())
 	require.NoError(t, model.DB.First(&user, user.Id).Error)
 	assert.Equal(t, agent.Id, user.InviterId)
-	assert.Equal(t, 1500123, user.QuotaBonus)
+	assert.EqualValues(t, 3*common.QuotaPerUnit+1_500_000, user.QuotaBonus)
 	var invitations []model.AgentInvitation
 	require.NoError(t, model.DB.Find(&invitations).Error)
 	require.Len(t, invitations, 1)
 	assert.Equal(t, model.InvitationSourceLinuxDO, invitations[0].Source)
-	assert.Equal(t, 123, invitations[0].BonusQuota)
+	assert.EqualValues(t, 3*common.QuotaPerUnit, invitations[0].BonusQuota)
 	var count int64
 	require.NoError(t, model.DB.Model(&model.BalanceLedger{}).Where("reason = ?", model.LedgerReasonAgentInvitationBonus).Count(&count).Error)
 	assert.EqualValues(t, 1, count)
@@ -373,7 +387,7 @@ func TestAgentInvitationLookupFailureCannotCreateUnattributedUser(t *testing.T) 
 			var invitation model.AgentInvitation
 			require.NoError(t, model.DB.First(&invitation).Error)
 			assert.Equal(t, users[1].Id, invitation.InviterId)
-			assert.Equal(t, 222, invitation.BonusQuota)
+			assert.EqualValues(t, 3*common.QuotaPerUnit, invitation.BonusQuota)
 		})
 	}
 }

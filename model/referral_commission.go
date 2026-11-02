@@ -293,7 +293,7 @@ func ValidReferralTransferIdempotencyKey(key string) bool {
 	return true
 }
 
-// TransferAffQuota 把待使用邀请奖励 aff_quota 划转到可消费的 reward 账户，
+// TransferAffQuota 把已解冻邀请奖励 aff_quota 划转到可消费的 paid 账户，
 // 同一事务内写账本并减少 aff_quota；aff_history 为累计值，不因划转减少。
 //
 // 幂等：IdempotencyKey 由用户提供、后端按用户命名空间化。同键同金额重放返回

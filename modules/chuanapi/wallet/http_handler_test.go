@@ -65,6 +65,7 @@ func setupWalletTestDB(t *testing.T) *gorm.DB {
 		&model.BalanceLedgerOperation{},
 		&model.BalanceLedger{},
 		&model.ReferralCommission{},
+		&model.AgentInvitation{},
 		&model.Log{},
 		&model.AuthFlow{}, &model.UserSession{}, &model.UserAccessToken{}, &model.TwoFA{}, &model.PasskeyCredential{}}, model.BonusSourceModels()...)...))
 	require.NoError(t, db.AutoMigrate(model.AgentPlatformModels()...))
@@ -190,6 +191,22 @@ func TestGetWalletSummaryAndLedgerExposesRewardAccount(t *testing.T) {
 	GetWalletLedger(c)
 	assert.Contains(t, recorder.Body.String(), `"success":false`)
 	assert.Contains(t, recorder.Body.String(), "account")
+}
+
+func TestWalletTestBonusStatusIsOwnOnlyAndExcludesInviterDetails(t *testing.T) {
+	db := setupWalletTestDB(t)
+	user := model.User{Username: "test-bonus-user", AffCode: "test-bonus-user", Status: common.UserStatusEnabled, Role: common.RoleCommonUser}
+	require.NoError(t, db.Create(&user).Error)
+	other := model.User{Username: "test-bonus-other", AffCode: "test-bonus-other", Status: common.UserStatusEnabled, Role: common.RoleCommonUser}
+	require.NoError(t, db.Create(&other).Error)
+	require.NoError(t, db.Create(&model.AgentInvitation{UserId: user.Id, InviterId: other.Id, InviterUsername: "private-inviter-name", InviterRole: common.RoleCommonUser, Source: model.InvitationSourcePassword, BonusQuota: 1_500_000, BonusReason: "granted"}).Error)
+	c, response := performWalletRequest(t, http.MethodGet, "/api/user/wallet", "", user.Id, common.RoleCommonUser)
+	GetWalletSummary(c)
+	assert.Contains(t, response.Body.String(), `"agent_test_bonus":{"quota":1500000,"status":"granted"}`)
+	assert.NotContains(t, response.Body.String(), "private-inviter-name")
+	c, response = performWalletRequest(t, http.MethodGet, "/api/user/wallet?user_id=1", "", other.Id, common.RoleCommonUser)
+	GetWalletSummary(c)
+	assert.Contains(t, response.Body.String(), `"agent_test_bonus":null`)
 }
 
 func TestGetReferralRewardsMasksSourceAndScopesToCurrentUser(t *testing.T) {

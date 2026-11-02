@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // WalletRuleSummary 是独立 Dashboard 使用的赠金与邀请奖励规则快照。
@@ -48,6 +49,15 @@ func GetWalletSummary(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	var invitation model.AgentInvitation
+	var testBonus any
+	invitationErr := model.DB.Select("bonus_quota", "bonus_reason").Where("user_id = ?", userId).First(&invitation).Error
+	if invitationErr == nil && (invitation.BonusReason == "granted" || invitation.BonusReason == "payment_compliance_required") {
+		testBonus = gin.H{"quota": invitation.BonusQuota, "status": invitation.BonusReason}
+	} else if invitationErr != nil && !errors.Is(invitationErr, gorm.ErrRecordNotFound) {
+		common.ApiError(c, invitationErr)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -60,6 +70,7 @@ func GetWalletSummary(c *gin.Context) {
 			"referral_available_quota": referral.AvailableQuota,
 			"referral_total_quota":     referral.TotalQuota,
 			"referral_invite_count":    referral.InviteCount,
+			"agent_test_bonus":         testBonus,
 		},
 	})
 }

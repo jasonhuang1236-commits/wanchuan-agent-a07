@@ -291,6 +291,10 @@ export interface WalletRules {
  * Wallet account summary (paid / bonus / reward)
  */
 export interface WalletSummary {
+  agent_test_bonus?: {
+    quota: number
+    status: 'granted' | 'payment_compliance_required'
+  } | null
   total: number
   paid: number
   bonus: number
