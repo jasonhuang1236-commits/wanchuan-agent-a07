@@ -29,6 +29,7 @@ import { Route as errors503RouteImport } from './routes/(errors)/503'
 import { Route as AuthenticatedChat2linkRouteImport } from './routes/_authenticated/chat2link'
 import { Route as AuthenticatedSystemSettingsRouteRouteImport } from './routes/_authenticated/system-settings/route'
 import { Route as AboutIndexRouteImport } from './routes/about/index'
+import { Route as AgentPayPublicIDRouteImport } from './routes/agent-pay/$publicID'
 import { Route as HelpIndexRouteImport } from './routes/help/index'
 import { Route as ModelMonitorIndexRouteImport } from './routes/model-monitor/index'
 import { Route as OauthProviderRouteImport } from './routes/oauth/$provider'
@@ -180,6 +181,11 @@ const AuthenticatedSystemSettingsRouteRoute =
 const AboutIndexRoute = AboutIndexRouteImport.update({
   id: '/about/',
   path: '/about/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentPayPublicIDRoute = AgentPayPublicIDRouteImport.update({
+  id: '/agent-pay/$publicID',
+  path: '/agent-pay/$publicID',
   getParentRoute: () => rootRouteImport,
 } as any)
 const HelpIndexRoute = HelpIndexRouteImport.update({
@@ -505,6 +511,7 @@ export interface FileRoutesByFullPath {
   '/500': typeof errors500Route
   '/503': typeof errors503Route
   '/chat2link': typeof AuthenticatedChat2linkRoute
+  '/agent-pay/$publicID': typeof AgentPayPublicIDRoute
   '/oauth/$provider': typeof OauthProviderRoute
   '/about/': typeof AboutIndexRoute
   '/help/': typeof HelpIndexRoute
@@ -577,6 +584,7 @@ export interface FileRoutesByTo {
   '/500': typeof errors500Route
   '/503': typeof errors503Route
   '/chat2link': typeof AuthenticatedChat2linkRoute
+  '/agent-pay/$publicID': typeof AgentPayPublicIDRoute
   '/oauth/$provider': typeof OauthProviderRoute
   '/about': typeof AboutIndexRoute
   '/help': typeof HelpIndexRoute
@@ -653,6 +661,7 @@ export interface FileRoutesById {
   '/(errors)/500': typeof errors500Route
   '/(errors)/503': typeof errors503Route
   '/_authenticated/chat2link': typeof AuthenticatedChat2linkRoute
+  '/agent-pay/$publicID': typeof AgentPayPublicIDRoute
   '/oauth/$provider': typeof OauthProviderRoute
   '/about/': typeof AboutIndexRoute
   '/help/': typeof HelpIndexRoute
@@ -728,6 +737,7 @@ export interface FileRouteTypes {
     | '/500'
     | '/503'
     | '/chat2link'
+    | '/agent-pay/$publicID'
     | '/oauth/$provider'
     | '/about/'
     | '/help/'
@@ -800,6 +810,7 @@ export interface FileRouteTypes {
     | '/500'
     | '/503'
     | '/chat2link'
+    | '/agent-pay/$publicID'
     | '/oauth/$provider'
     | '/about'
     | '/help'
@@ -875,6 +886,7 @@ export interface FileRouteTypes {
     | '/(errors)/500'
     | '/(errors)/503'
     | '/_authenticated/chat2link'
+    | '/agent-pay/$publicID'
     | '/oauth/$provider'
     | '/about/'
     | '/help/'
@@ -942,6 +954,7 @@ export interface RootRouteChildren {
   errors404Route: typeof errors404Route
   errors500Route: typeof errors500Route
   errors503Route: typeof errors503Route
+  AgentPayPublicIDRoute: typeof AgentPayPublicIDRoute
   OauthProviderRoute: typeof OauthProviderRoute
   AboutIndexRoute: typeof AboutIndexRoute
   HelpIndexRoute: typeof HelpIndexRoute
@@ -1094,6 +1107,13 @@ declare module '@tanstack/react-router' {
       path: '/about'
       fullPath: '/about/'
       preLoaderRoute: typeof AboutIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agent-pay/$publicID': {
+      id: '/agent-pay/$publicID'
+      path: '/agent-pay/$publicID'
+      fullPath: '/agent-pay/$publicID'
+      preLoaderRoute: typeof AgentPayPublicIDRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/help/': {
@@ -1641,6 +1661,7 @@ const rootRouteChildren: RootRouteChildren = {
   errors404Route: errors404Route,
   errors500Route: errors500Route,
   errors503Route: errors503Route,
+  AgentPayPublicIDRoute: AgentPayPublicIDRoute,
   OauthProviderRoute: OauthProviderRoute,
   AboutIndexRoute: AboutIndexRoute,
   HelpIndexRoute: HelpIndexRoute,

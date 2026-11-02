@@ -19,10 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 import { useTranslation } from 'react-i18next'
 
 import { StatusBadge } from '@/components/status-badge'
-import { ledgerReasonLabelKey } from '@/extensions/chuanapi/wallet/lib/ledger'
 import { toIntlLocale } from '@/i18n/languages'
 import { formatQuotaWithCurrency } from '@/lib/currency'
 import { formatNumber, formatTimestampToDate } from '@/lib/format'
+import { ledgerReasonLabelKey } from '@/lib/ledger-labels'
 
 import { formatMinorMoney } from '../lib/money'
 

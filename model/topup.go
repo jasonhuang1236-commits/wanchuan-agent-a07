@@ -13,6 +13,7 @@ import (
 )
 
 type TopUp struct {
+	AgentSimpleTopUp      bool    `json:"agent_simple_topup,omitempty" gorm:"not null;default:false;index"`
 	PaymentReceiptID      int64   `json:"payment_receipt_id"`
 	PaidProviderReference string  `json:"-" gorm:"type:varchar(255)"`
 	PaidMerchantScope     string  `json:"-" gorm:"type:varchar(128)"`
@@ -96,6 +97,28 @@ func ValidateTopUpQuotaCapacity(userId int, creditedQuota int) error {
 // holds the user row lock; returning an error after its result rolls the entire
 // caller transaction back, including the order status and ledger rows.
 func creditTopUpQuota(tx *gorm.DB, entry LedgerEntry) (*LedgerResult, error) {
+	if entry.ReferenceType == ReferralReferenceTopUp {
+		var topUp TopUp
+		if err := tx.Where("trade_no = ? AND user_id = ?", entry.ReferenceId, entry.UserId).First(&topUp).Error; err != nil {
+			return nil, err
+		}
+		if topUp.AgentSimpleTopUp {
+			paidQuota, err := common.WalletQuotaFromDecimalStrict(
+				decimal.NewFromFloat(topUp.Money).Mul(decimal.NewFromInt(int64(common.QuotaPerUnit))),
+			)
+			if err != nil || paidQuota <= 0 {
+				return nil, ErrTopUpQuotaLimitExceeded
+			}
+			if err := creditAgentSimpleCashTx(tx, topUp.UserId, 0, int64(entry.Delta), int64(paidQuota), topUp.TradeNo, "Online agent balance recharge"); err != nil {
+				return nil, err
+			}
+			var user User
+			if err := tx.Select("quota").First(&user, topUp.UserId).Error; err != nil {
+				return nil, err
+			}
+			return &LedgerResult{TotalAfter: user.Quota}, nil
+		}
+	}
 	if _, err := topUpQuotaMaxCurrent(entry.Delta); err != nil {
 		return nil, err
 	}

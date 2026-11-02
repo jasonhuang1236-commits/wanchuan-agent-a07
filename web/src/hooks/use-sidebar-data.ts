@@ -61,13 +61,18 @@ export function useSidebarData(badges: SidebarBadges = {}): SidebarData {
           title: t('Agent'),
           items: [
             {
-              title: t('Redemption Codes'),
-              url: '/redemption-codes',
+              title: t('Agent Overview'),
+              url: '/agent-platform',
+              icon: Users,
+            },
+            {
+              title: t('Redemption Code Center'),
+              url: '/redemption-codes?view=center',
               icon: Ticket,
             },
             {
-              title: t('Legacy quota & invitations'),
-              url: '/agent-redemption',
+              title: t('Redemption Code Records'),
+              url: '/redemption-codes?view=records',
               icon: ClipboardList,
             },
           ],
@@ -142,11 +147,6 @@ export function useSidebarData(badges: SidebarBadges = {}): SidebarData {
         title: t('Personal'),
         items: [
           {
-            title: t('Agent services & commissions'),
-            url: '/agent-platform',
-            icon: Users,
-          },
-          {
             title: t('Wallet'),
             url: '/wallet',
             icon: Wallet,
@@ -196,11 +196,7 @@ export function useSidebarData(badges: SidebarBadges = {}): SidebarData {
             title: t('Agent finance'),
             url: '/agent-platform/finance',
             icon: Users,
-          },
-          {
-            title: t('Legacy agent budgets'),
-            url: '/agent-redemption',
-            icon: Users,
+            requiredRole: ROLE.SUPER_ADMIN,
           },
           {
             title: t('Subscriptions'),

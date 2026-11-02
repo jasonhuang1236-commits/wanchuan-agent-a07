@@ -30,7 +30,11 @@ import { useAuthStore } from '@/stores/auth-store'
 import { redemptionOperation } from '../lib/transaction'
 import { useRedemptions } from './redemptions-provider'
 
-export function RedemptionsPrimaryButtons(props: { agentId?: number }) {
+export function RedemptionsPrimaryButtons(props: {
+  agentId?: number
+  center?: boolean
+  onSimpleCreate?: () => void
+}) {
   const { t } = useTranslation()
   const { setOpen, triggerRefresh } = useRedemptions()
   const [showDeleteInvalidConfirm, setShowDeleteInvalidConfirm] =
@@ -59,17 +63,28 @@ export function RedemptionsPrimaryButtons(props: { agentId?: number }) {
   return (
     <>
       <div className='flex flex-wrap gap-2'>
+        {!props.center && (
+          <Button
+            size='sm'
+            variant='outline'
+            onClick={() => setShowDeleteInvalidConfirm(true)}
+          >
+            <Trash2 className='text-destructive h-4 w-4' />
+            {t('Delete Invalid')}
+          </Button>
+        )}
         <Button
           size='sm'
-          variant='outline'
-          onClick={() => setShowDeleteInvalidConfirm(true)}
+          onClick={() => {
+            if (props.center && props.onSimpleCreate) {
+              props.onSimpleCreate()
+            } else {
+              setOpen('create')
+            }
+          }}
         >
-          <Trash2 className='text-destructive h-4 w-4' />
-          {t('Delete Invalid')}
-        </Button>
-        <Button size='sm' onClick={() => setOpen('create')}>
           <Plus className='h-4 w-4' />
-          {t('Create Code')}
+          {props.center ? t('Issue Redemption Code') : t('Create Code')}
         </Button>
       </div>
 

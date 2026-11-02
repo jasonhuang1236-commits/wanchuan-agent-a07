@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
-	"strconv"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -47,9 +45,6 @@ type agentCommissionPaymentSnapshot struct {
 	Qualification  string                    `json:"qualification"`
 	ProfileVersion int64                     `json:"profile_version"`
 	PaidQuota      int                       `json:"paid_quota"`
-	LegacyEnabled  bool                      `json:"legacy_enabled"`
-	LegacyRate     string                    `json:"legacy_rate"`
-	LegacyOrdinal  int                       `json:"legacy_ordinal"`
 	PaidAt         int64                     `json:"paid_at"`
 	Payment        AgentVerifiedPaymentFacts `json:"payment"`
 	Policy         AgentPolicy               `json:"policy"`
@@ -71,11 +66,11 @@ func EnqueueAgentCommissionTopUpTx(tx *gorm.DB, entry LedgerEntry) error {
 	if err != nil {
 		return err
 	}
-	snapshot := agentCommissionPaymentSnapshot{UserID: entry.UserId, PaidQuota: entry.Delta, LegacyEnabled: common.AffiliateRewardEnabled, LegacyRate: strconv.FormatFloat(common.AffiliateRewardRate, 'g', -1, 64), PaidAt: topup.CompleteTime, Qualification: "ordinary"}
 	var source User
 	if err := tx.Select("id", "status", "inviter_id").First(&source, entry.UserId).Error; err != nil {
 		return err
 	}
+	snapshot := agentCommissionPaymentSnapshot{UserID: entry.UserId, PaidQuota: entry.Delta, PaidAt: topup.CompleteTime, Qualification: "ordinary"}
 	snapshot.InviterID = source.InviterId
 	if qualifies && source.Status == common.UserStatusEnabled && source.InviterId > 0 && source.InviterId != source.Id {
 		var inviter User
@@ -84,36 +79,15 @@ func EnqueueAgentCommissionTopUpTx(tx *gorm.DB, entry LedgerEntry) error {
 			return err
 		}
 		snapshot.Eligible = err == nil && inviter.Status == common.UserStatusEnabled
-		var profile AgentProfile
-		err = tx.Where("user_id = ?", source.InviterId).First(&profile).Error
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-		if err == nil {
-			snapshot.ProfileVersion = profile.Version
-			if profile.Status == "active" && !profile.SalesFrozen {
-				snapshot.Qualification = "agent"
-			}
-		}
-	}
-	if qualifies {
-		snapshot.LegacyOrdinal, err = countQualifyingTopUpEventsTx(tx, entry.UserId)
+		active, err := activeAgentSalesTx(tx, source.InviterId)
 		if err != nil {
 			return err
 		}
+		if active {
+			snapshot.Qualification = "agent"
+		}
 	}
-	// Read without acquiring a later policy lock while the principal wallet row
-	// is locked. Policy versions are immutable, so this is a coherent snapshot.
-	policy, err := ReadCurrentAgentPolicyTx(tx)
-	if err != nil {
-		return err
-	}
-	snapshot.Policy = *policy
 	snapshot.Payment = topup.verifiedAgentPaymentFacts()
-	route := "legacy"
-	if policy.CommissionCutoverAt > 0 && topup.CompleteTime >= policy.CommissionCutoverAt && topup.PaymentReceiptID > 0 {
-		route = "cash"
-	}
 	payload, err := common.Marshal(snapshot)
 	if err != nil {
 		return err
@@ -122,7 +96,7 @@ func EnqueueAgentCommissionTopUpTx(tx *gorm.DB, entry LedgerEntry) error {
 	if err != nil {
 		return err
 	}
-	row := AgentCommissionOutbox{EventKey: key, Kind: "payment", ReferenceID: entry.ReferenceId, SourceUserID: entry.UserId, Route: route, Payload: string(payload), Status: "pending", NextAttemptAt: common.GetTimestamp()}
+	row := AgentCommissionOutbox{EventKey: key, Kind: "payment", ReferenceID: entry.ReferenceId, SourceUserID: entry.UserId, Route: "referral", Payload: string(payload), Status: "pending", NextAttemptAt: common.GetTimestamp()}
 	return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error
 }
 
@@ -186,10 +160,12 @@ func processAgentCommissionEvent(ctx context.Context, id int64) error {
 			if err := common.UnmarshalJsonStr(event.Payload, &snapshot); err != nil {
 				return err
 			}
-			if event.Route == "legacy" {
-				outcome, err = recordLegacyReferralSnapshotTx(tx, &event, snapshot)
+			if event.Route == "referral" {
+				outcome, err = recordReferralSnapshotTx(tx, &event, snapshot)
+			} else if event.Route == "legacy" {
+				outcome = "retired_legacy_event"
 			} else if event.Route == "cash" {
-				outcome, err = recordAgentCashCommissionTx(tx, &event, snapshot)
+				outcome = "retired_cash_event"
 			} else {
 				return ErrAgentCommissionInvariant
 			}
@@ -210,37 +186,48 @@ func processAgentCommissionEvent(ctx context.Context, id int64) error {
 	})
 }
 
-func recordLegacyReferralSnapshotTx(tx *gorm.DB, event *AgentCommissionOutbox, s agentCommissionPaymentSnapshot) (string, error) {
-	if !s.Eligible || !s.LegacyEnabled || s.LegacyOrdinal < 1 || s.LegacyOrdinal > ReferralCommissionMaxTopUpEvents {
-		return "legacy_ineligible", nil
+func recordReferralSnapshotTx(tx *gorm.DB, event *AgentCommissionOutbox, s agentCommissionPaymentSnapshot) (string, error) {
+	if !s.Eligible {
+		return "referral_ineligible", nil
 	}
-	rate, err := strconv.ParseFloat(s.LegacyRate, 64)
-	if err != nil || math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0 || rate > 1 {
-		return "", ErrAgentCommissionInvalid
+	rate := ReferralOrdinaryRate
+	if s.Qualification == "agent" {
+		rate = ReferralAgentRate
 	}
 	reward, err := common.WalletQuotaFromDecimalStrict(decimal.NewFromInt(int64(s.PaidQuota)).Mul(decimal.NewFromFloat(rate)).Truncate(0))
 	if err != nil {
 		return "", err
 	}
 	if reward == 0 {
-		return "legacy_zero", nil
+		return "referral_zero", nil
 	}
 	var inviter User
 	if err := lockForUpdate(tx).Select("id", "aff_quota", "aff_history").First(&inviter, s.InviterID).Error; err != nil {
 		return "", err
 	}
-	if inviter.AffQuota < 0 || inviter.AffHistoryQuota < 0 || inviter.AffQuota > common.MaxWalletQuota-reward || inviter.AffHistoryQuota > common.MaxWalletQuota-reward {
+	if inviter.AffQuota < -common.MaxWalletQuota || inviter.AffHistoryQuota < 0 || inviter.AffQuota > common.MaxWalletQuota-reward || inviter.AffHistoryQuota > common.MaxWalletQuota-reward {
 		return "", ErrAgentCommissionInvariant
 	}
-	row := ReferralCommission{UserId: s.InviterID, SourceUserId: s.UserID, ReferenceType: ReferralReferenceTopUp, ReferenceId: event.ReferenceID, PaidQuota: s.PaidQuota, RewardQuota: reward, Rate: rate}
+	paidAt := s.PaidAt
+	if paidAt <= 0 {
+		paidAt = common.GetTimestamp()
+	}
+	row := ReferralCommission{UserId: s.InviterID, SourceUserId: s.UserID, ReferenceType: ReferralReferenceTopUp, ReferenceId: event.ReferenceID, PaidQuota: s.PaidQuota, RewardQuota: reward, Rate: rate, Status: ReferralCommissionStatusFrozen, MaturesAt: paidAt + ReferralCommissionFreezeSeconds}
 	created := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
 	if created.Error != nil {
 		return "", created.Error
 	}
 	if created.RowsAffected == 0 {
-		return "legacy_replayed", nil
+		return "referral_replayed", nil
 	}
-	return "legacy_awarded", tx.Model(&User{}).Where("id = ?", s.InviterID).Updates(map[string]any{"aff_quota": inviter.AffQuota + reward, "aff_history": inviter.AffHistoryQuota + reward}).Error
+	update := tx.Model(&User{}).Where("id = ? AND aff_quota >= ? AND aff_history >= 0 AND aff_quota <= ? AND aff_history <= ?", s.InviterID, -common.MaxWalletQuota, common.MaxWalletQuota-reward, common.MaxWalletQuota-reward).Updates(map[string]any{"aff_quota": gorm.Expr("aff_quota + ?", reward), "aff_history": gorm.Expr("aff_history + ?", reward)})
+	if update.Error != nil {
+		return "", update.Error
+	}
+	if update.RowsAffected != 1 {
+		return "", ErrAgentCommissionInvariant
+	}
+	return "referral_awarded", nil
 }
 
 func recordAgentCashCommissionTx(tx *gorm.DB, event *AgentCommissionOutbox, s agentCommissionPaymentSnapshot) (string, error) {

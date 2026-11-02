@@ -40,7 +40,10 @@ func migrateLegacy(db *gorm.DB) error {
 	if err := model.MigrateLegacyAgentFundsWithDB(db); err != nil {
 		return err
 	}
-	return model.MigrateAgentFundEconomicsWithDB(db)
+	if err := model.MigrateAgentFundEconomicsWithDB(db); err != nil {
+		return err
+	}
+	return model.MigrateAgentSimpleA07WithDB(db)
 }
 
 func registerRoutes(scopes extension.RouteScopes) error {

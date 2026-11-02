@@ -16,76 +16,93 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
+import { createElement, type ReactNode } from 'react'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { api } from '@/lib/api'
 
 import { useAffiliate } from '../use-affiliate'
 
-describe('useAffiliate transaction handoff', () => {
+describe('useAffiliate transfer retries', () => {
   beforeEach(() => {
     vi.spyOn(api, 'get').mockResolvedValue({
       data: { success: true, data: 'aff-1' },
     })
   })
+
   async function renderAffiliate() {
-    const view = renderHook(() => useAffiliate())
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const view = renderHook(() => useAffiliate(), {
+      wrapper: (props: { children: ReactNode }) =>
+        createElement(QueryClientProvider, { client }, props.children),
+    })
     await waitFor(() => expect(view.result.current.loading).toBe(false))
     return view
   }
-  test('does not transfer before a concrete transaction is authorized', async () => {
-    const post = vi.spyOn(api, 'post')
+
+  test('moves released rewards using the browser session without a separate transaction challenge', async () => {
+    const post = vi
+      .spyOn(api, 'post')
+      .mockResolvedValue({ data: { success: true } })
     const { result } = await renderAffiliate()
-    let pending!: Promise<boolean>
-    act(() => {
-      pending = result.current.transferQuota(500000)
+    await act(async () => {
+      expect(await result.current.transferQuota(150000)).toBe(true)
     })
-    expect(result.current.transferDraft).toMatchObject({
-      action: 'commission.convert.legacy',
-      payload: { quota: 500000 },
-    })
-    expect(post).not.toHaveBeenCalled()
-    act(() => result.current.finishTransfer(false))
-    expect(await pending).toBe(false)
+    expect(post).toHaveBeenCalledWith(
+      '/api/user/aff_transfer',
+      { quota: 150000 },
+      {
+        headers: { 'Idempotency-Key': expect.any(String) },
+      }
+    )
   })
-  test('retains the same request ID after an unresolved or cancelled attempt', async () => {
+
+  test('reuses the same idempotency key after a failed response and renews it after success', async () => {
+    const post = vi
+      .spyOn(api, 'post')
+      .mockRejectedValueOnce(new Error('Network unavailable'))
+      .mockResolvedValue({ data: { success: true } })
     const { result } = await renderAffiliate()
-    act(() => {
-      void result.current.transferQuota(500000)
+    await act(async () => {
+      expect(await result.current.transferQuota(500000)).toBe(false)
     })
-    const firstId = result.current.transferDraft?.request_id
-    act(() => result.current.finishTransfer(false))
-    act(() => {
-      void result.current.transferQuota(500000)
+    await act(async () => {
+      expect(await result.current.transferQuota(500000)).toBe(true)
     })
-    expect(result.current.transferDraft?.request_id).toBe(firstId)
-    act(() => result.current.finishTransfer(false))
+    await act(async () => {
+      expect(await result.current.transferQuota(500000)).toBe(true)
+    })
+    const keys = post.mock.calls.map(
+      (call) => call[2]?.headers?.['Idempotency-Key']
+    )
+    expect(keys[0]).toBe(keys[1])
+    expect(keys[2]).not.toBe(keys[1])
   })
-  test('allocates a fresh request only after completed transfer', async () => {
+
+  test('rejects duplicate in-flight and unsafe amounts without another request', async () => {
+    let finish!: (value: unknown) => void
+    const post = vi.spyOn(api, 'post').mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve
+      })
+    )
     const { result } = await renderAffiliate()
+    let transfer!: Promise<boolean>
     act(() => {
-      void result.current.transferQuota(500000)
+      transfer = result.current.transferQuota(500000)
     })
-    const firstId = result.current.transferDraft?.request_id
-    act(() => result.current.finishTransfer(true))
-    act(() => {
-      void result.current.transferQuota(500000)
-    })
-    expect(result.current.transferDraft?.request_id).not.toBe(firstId)
-    act(() => result.current.finishTransfer(false))
-  })
-  test('rejects duplicates and unsafe quota without replacing the existing operation', async () => {
-    const { result } = await renderAffiliate()
+    expect(await result.current.transferQuota(1000000)).toBe(false)
     expect(
       await result.current.transferQuota(Number.MAX_SAFE_INTEGER + 1)
     ).toBe(false)
-    act(() => {
-      void result.current.transferQuota(500000)
+    expect(post).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      finish({ data: { success: true } })
+      expect(await transfer).toBe(true)
     })
-    const firstId = result.current.transferDraft?.request_id
-    expect(await result.current.transferQuota(1000000)).toBe(false)
-    expect(result.current.transferDraft?.request_id).toBe(firstId)
-    act(() => result.current.finishTransfer(false))
   })
 })

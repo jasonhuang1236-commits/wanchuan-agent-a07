@@ -32,6 +32,7 @@ import {
   LazyHelpIndex,
   LazyPaymentSettingsRenderer,
   LazyWallet,
+  LazyWalletReferralPanel,
   LazyMonitor,
   LazyMonitorSettings,
 } from './lazy-pages'
@@ -67,6 +68,7 @@ export const chuanapiI18nExtension: I18nExtension = {
 export const chuanapiWalletExtension: WalletExtension = {
   id: 'chuanapi/wallet',
   page: LazyWallet,
+  referralPanel: LazyWalletReferralPanel,
 }
 
 export const chuanapiMonitorExtension: MonitorExtension = {

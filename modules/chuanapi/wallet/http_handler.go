@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/paymentcore"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/gin-gonic/gin"
 )
@@ -24,19 +25,24 @@ type WalletRuleSummary struct {
 	ReferralBonusRate    float64 `json:"referral_bonus_rate"`
 }
 
-func walletRuleSummary() WalletRuleSummary {
+func walletRuleSummary(referral *model.ReferralSummary) WalletRuleSummary {
 	return WalletRuleSummary{
 		SignupBonusEnabled:   true,
 		SignupBonusQuota:     common.QuotaRound(common.LinuxDOSignupBonusUSD * common.QuotaPerUnit),
 		SignupBonusProvider:  "linuxdo",
-		ReferralBonusEnabled: common.AffiliateRewardEnabled,
-		ReferralBonusRate:    common.AffiliateRewardRate,
+		ReferralBonusEnabled: operation_setting.IsPaymentComplianceConfirmed(),
+		ReferralBonusRate:    referral.Rate,
 	}
 }
 
 // GetWalletSummary 公开钱包三账户：paid、bonus 与划转后的邀请奖励 reward。
 func GetWalletSummary(c *gin.Context) {
 	userId := c.GetInt("id")
+	referral, err := model.GetReferralSummary(userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	paid, bonus, reward, err := model.GetUserAccountBalances(userId)
 	if err != nil {
 		common.ApiError(c, err)
@@ -46,11 +52,14 @@ func GetWalletSummary(c *gin.Context) {
 		"success": true,
 		"message": "",
 		"data": gin.H{
-			"total":  paid + bonus + reward,
-			"paid":   paid,
-			"bonus":  bonus,
-			"reward": reward,
-			"rules":  walletRuleSummary(),
+			"total":                    paid + bonus + reward,
+			"paid":                     paid,
+			"bonus":                    bonus,
+			"reward":                   reward,
+			"rules":                    walletRuleSummary(referral),
+			"referral_available_quota": referral.AvailableQuota,
+			"referral_total_quota":     referral.TotalQuota,
+			"referral_invite_count":    referral.InviteCount,
 		},
 	})
 }
@@ -132,13 +141,16 @@ func GetWalletLedger(c *gin.Context) {
 // ReferralCommissionRowDTO 是返佣记录的脱敏视图：只展示当前用户自己的奖励，
 // 来源好友仅返回脱敏用户名。
 type ReferralCommissionRowDTO struct {
-	Id           int     `json:"id"`
-	SourceUserId int     `json:"source_user_id"`
-	SourceName   string  `json:"source_name"`
-	PaidQuota    int     `json:"paid_quota"`
-	RewardQuota  int     `json:"reward_quota"`
-	Rate         float64 `json:"rate"`
-	CreatedAt    int64   `json:"created_at"`
+	Id            int     `json:"id"`
+	SourceUserId  int     `json:"source_user_id"`
+	SourceName    string  `json:"source_name"`
+	PaidQuota     int     `json:"paid_quota"`
+	RewardQuota   int     `json:"reward_quota"`
+	ReversedQuota int     `json:"reversed_quota"`
+	Rate          float64 `json:"rate"`
+	Status        string  `json:"status"`
+	MaturesAt     int64   `json:"matures_at"`
+	CreatedAt     int64   `json:"created_at"`
 }
 
 // GetReferralRewards 分页返回当前用户的返佣记录（新表 referral_commissions）。
@@ -149,6 +161,11 @@ func GetReferralRewards(c *gin.Context) {
 		return
 	}
 	commissions, total, err := model.ListReferralCommissions(userId, page, getPageSizeParam(c))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	available, err := model.GetAvailableReferralQuota(userId)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -165,19 +182,22 @@ func GetReferralRewards(c *gin.Context) {
 	rows := make([]ReferralCommissionRowDTO, 0, len(commissions))
 	for _, commission := range commissions {
 		rows = append(rows, ReferralCommissionRowDTO{
-			Id:           commission.Id,
-			SourceUserId: commission.SourceUserId,
-			SourceName:   maskReferralSourceName(usernames[commission.SourceUserId]),
-			PaidQuota:    commission.PaidQuota,
-			RewardQuota:  commission.RewardQuota,
-			Rate:         commission.Rate,
-			CreatedAt:    commission.CreatedAt,
+			Id:            commission.Id,
+			SourceUserId:  commission.SourceUserId,
+			SourceName:    maskReferralSourceName(usernames[commission.SourceUserId]),
+			PaidQuota:     commission.PaidQuota,
+			RewardQuota:   commission.RewardQuota,
+			ReversedQuota: commission.ReversedQuota,
+			Rate:          commission.Rate,
+			Status:        commission.Status,
+			MaturesAt:     commission.MaturesAt,
+			CreatedAt:     commission.CreatedAt,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    gin.H{"items": rows, "total": total},
+		"data":    gin.H{"items": rows, "total": total, "available_quota": available},
 	})
 }
 
@@ -217,10 +237,6 @@ func TransferAffQuota(c *gin.Context) {
 		common.ApiErrorMsg(c, "划转额度超出上限")
 		return
 	}
-	if common.QuotaPerUnit <= 0 || amount < int64(common.QuotaPerUnit) {
-		common.ApiErrorI18n(c, i18n.MsgUserTransferQuotaMinimum, map[string]any{"Min": logger.FormatQuota(int(common.QuotaPerUnit))})
-		return
-	}
 	// The public, typed dashboard context is populated by auth middleware.
 	// Keep this leaf module independent of middleware/service (service registers
 	// wallet implementations). The model revalidates the session in the money tx.
@@ -230,25 +246,11 @@ func TransferAffQuota(c *gin.Context) {
 		common.ApiErrorStatus(c, http.StatusForbidden, common.NewMessage("Financial operations require a current browser session"))
 		return
 	}
-	input := model.AgentLegacyCommissionRequest{RequestID: idempotencyKey, Quota: int(amount)}
-	payload, err := common.Marshal(input)
-	if err != nil {
-		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("Invalid commission request"))
-		return
-	}
-	prepared, err := model.PrepareAgentCommissionOperation(identity, "commission.convert.legacy", idempotencyKey, payload)
-	if err != nil {
-		common.ApiErrorStatus(c, http.StatusForbidden, common.NewMessage("Financial authorization is invalid or no longer matches this transaction"))
-		return
-	}
-	authorization, err := model.PrepareAgentTransactionAuthorization(c.GetHeader("X-Security-Proof"), identity, prepared.VerificationContext)
-	if err != nil {
-		common.ApiErrorStatus(c, http.StatusForbidden, common.NewMessage("Financial authorization is invalid or no longer matches this transaction"))
-		return
-	}
-	result, err := model.TransferAffQuota(c.GetInt("id"), int(amount), idempotencyKey, authorization)
+	result, err := model.TransferAffQuotaForSession(identity, int(amount), idempotencyKey)
 	if err != nil {
 		switch {
+		case errors.Is(err, model.ErrAgentTransactionProof):
+			common.ApiErrorStatus(c, http.StatusForbidden, common.NewMessage("Financial operations require a current browser session"))
 		case errors.Is(err, model.ErrLedgerInsufficientBalance):
 			common.ApiErrorMsg(c, "待使用邀请奖励不足")
 		case errors.Is(err, model.ErrLedgerIdempotencyConflict):

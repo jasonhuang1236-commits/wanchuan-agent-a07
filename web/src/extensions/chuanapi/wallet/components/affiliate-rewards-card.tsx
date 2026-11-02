@@ -27,7 +27,6 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { TitledCard } from '@/components/ui/titled-card'
 import { formatQuota } from '@/lib/format'
 
-import { REFERRAL_REWARD_MAX_TOPUP_EVENTS } from '../constants'
 import { formatReferralRate } from '../lib'
 import type { ReferralCommissionItem, UserWalletData } from '../types'
 import { ReferralCommissionRecords } from './referral-commission-records'
@@ -36,6 +35,7 @@ interface AffiliateRewardsCardProps {
   user: UserWalletData | null
   affiliateLink: string
   onTransfer: () => void
+  availableQuota: number
   complianceConfirmed?: boolean
   referralRate: number
   records: ReferralCommissionItem[]
@@ -67,9 +67,9 @@ export function AffiliateRewardsCard(props: AffiliateRewardsCardProps) {
     )
   }
 
-  const hasRewards = (props.user?.aff_quota ?? 0) > 0
+  const hasRewards = props.availableQuota > 0
   const stats = [
-    [t('Pending Rewards'), formatQuota(props.user?.aff_quota ?? 0)],
+    [t('Referral Rewards Available'), formatQuota(props.availableQuota)],
     [t('Total Rewards'), formatQuota(props.user?.aff_history_quota ?? 0)],
     [t('Referral Invited Users'), String(props.user?.aff_count ?? 0)],
   ]
@@ -143,26 +143,17 @@ export function AffiliateRewardsCard(props: AffiliateRewardsCardProps) {
         <h4 className='text-sm font-semibold'>{t('Reward Rules')}</h4>
         <ol className='text-muted-foreground list-decimal space-y-1 ps-4 text-xs'>
           <li>
-            {t(
-              'Invite friends to register. You will receive rewards after they recharge.'
-            )}
+            {t('Only website online top-ups qualify for invitation rewards.')}
+          </li>
+          <li>
+            {t('Earn {{rate}} from every qualifying top-up, with no cap.', {
+              rate: formatReferralRate(props.referralRate),
+            })}
           </li>
           <li>
             {t(
-              'For the first {{limit}} recharges of an invited friend, you will receive {{rate}} of the recharge amount as a reward.',
-              {
-                limit: REFERRAL_REWARD_MAX_TOPUP_EVENTS,
-                rate: formatReferralRate(props.referralRate),
-              }
+              'Rewards unlock after five days. Refunds cancel or reverse the matching reward amount.'
             )}
-          </li>
-          <li>
-            {t(
-              'Use the transfer feature to move reward credits into your account balance.'
-            )}
-          </li>
-          <li>
-            {t('The more friends you invite, the more rewards you earn.')}
           </li>
         </ol>
       </div>

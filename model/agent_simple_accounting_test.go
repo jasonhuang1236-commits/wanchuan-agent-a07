@@ -1,0 +1,154 @@
+package model
+
+import (
+	"context"
+	"fmt"
+	"testing"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func simpleAccountingFixture(t *testing.T) (AuthSessionIdentity, AuthSessionIdentity) {
+	t.Helper()
+	_, agent := setupAgentRedemptionTest(t)
+	root := User{Username: "a07-accounting-root", AffCode: "a07-accounting-root", Role: common.RoleRootUser, Status: common.UserStatusEnabled, AuthVersion: 1}
+	require.NoError(t, DB.Create(&root).Error)
+	rootIdentity := agentSimpleIdentity(t, root.Id, "a07-accounting-root")
+	agentIdentity := agentSimpleIdentity(t, agent.UserID, "a07-accounting-agent")
+	require.NoError(t, DB.Create(&AgentSimpleAccount{AgentUserID: agent.UserID, Status: AgentSimpleStatusActive, Version: 1}).Error)
+	_, err := UpdateAgentSimplePaymentFee(rootIdentity, AgentSimplePaymentFeeRequest{RequestID: "a07-accounting-fee", PaymentMethod: "alipay", FeeBPS: 0, Enabled: true, Reason: "Synthetic fee fixture"})
+	require.NoError(t, err)
+	return rootIdentity, agentIdentity
+}
+
+func simpleAccountingPayment(t *testing.T, identity AuthSessionIdentity, reference string, price int64) *AgentSimplePaymentOrderView {
+	t.Helper()
+	order, err := CreateAgentSimplePaymentOrder(identity, AgentSimplePaymentRequest{RequestID: reference, Name: reference, Quota: 500_000, SalePriceFen: price, PaymentMethod: "alipay"}, reference, reference+"-synthetic-payment-link-token-000000000000", reference, "https://pay.example.test", `{}`, "https://example.test")
+	require.NoError(t, err)
+	_, err = SettleAgentSimplePaymentByTradeNo(reference, "alipay", fmt.Sprintf("%d.%02d", price/100, price%100))
+	require.NoError(t, err)
+	return order
+}
+
+func TestAgentSimpleRedeemedPaymentProfitStillMaturesExactlyOnce(t *testing.T) {
+	_, agent := simpleAccountingFixture(t)
+	order := simpleAccountingPayment(t, agent, "a07-redeemed-profit", 120)
+	var stored AgentSimplePaymentOrder
+	require.NoError(t, DB.First(&stored, order.ID).Error)
+	var code Redemption
+	require.NoError(t, DB.First(&code, stored.RedemptionID).Error)
+	_, err := Redeem(code.Key, agentTestRecipientID)
+	require.NoError(t, err)
+	require.NoError(t, DB.Model(&stored).Update("matures_at", common.GetTimestamp()-1).Error)
+	for range 2 {
+		_, err = MatureAgentSimplePaymentProfits(context.Background(), 100)
+		require.NoError(t, err)
+	}
+	var account AgentSimpleAccount
+	require.NoError(t, DB.First(&account, agent.UserID).Error)
+	assert.Zero(t, account.PaymentPendingQuota)
+	assert.EqualValues(t, 150_000, account.PaymentAvailableQuota)
+}
+
+func TestAgentSimpleRefundOfWithdrawnProfitPreservesOtherOrdersHold(t *testing.T) {
+	root, agent := simpleAccountingFixture(t)
+	first := simpleAccountingPayment(t, agent, "a07-refundable-withdrawn", 3090)
+	require.NoError(t, DB.Model(&AgentSimplePaymentOrder{}).Where("id = ?", first.ID).Update("matures_at", common.GetTimestamp()-1).Error)
+	_, err := MatureAgentSimplePaymentProfits(context.Background(), 100)
+	require.NoError(t, err)
+	_, err = WithdrawAgentSimplePaymentProfit(root, AgentSimplePaymentWithdrawalRequest{RequestID: "a07-profit-withdrawal", AgentUserID: agent.UserID, Quota: 15_000_000, Reason: "Synthetic withdrawal", Evidence: "Synthetic paid receipt"})
+	require.NoError(t, err)
+	second := simpleAccountingPayment(t, agent, "a07-unrelated-frozen", 120)
+	refund := AgentSimplePaymentRefundCommand{RequestID: "a07-profit-refund", OrderID: first.ID, Reason: "Unredeemed customer refund", Evidence: "Synthetic refund receipt"}
+	require.NoError(t, RefundAgentSimplePayment(root, refund))
+	require.NoError(t, RefundAgentSimplePayment(root, refund), "a replay must not reverse profit twice")
+	var account AgentSimpleAccount
+	require.NoError(t, DB.First(&account, agent.UserID).Error)
+	assert.EqualValues(t, 150_000, account.PaymentPendingQuota)
+	assert.EqualValues(t, 15_000_000, account.PaymentDebtQuota)
+	for range 2 {
+		_, err = MatureAgentSimplePaymentProfits(context.Background(), 100)
+		require.NoError(t, err)
+	}
+	require.NoError(t, DB.First(&account, agent.UserID).Error)
+	assert.EqualValues(t, 15_000_000, account.PaymentDebtQuota, "frozen profits cannot repeatedly erase refund debt")
+	require.NoError(t, DB.Model(&AgentSimplePaymentOrder{}).Where("id = ?", second.ID).Update("matures_at", common.GetTimestamp()-1).Error)
+	_, err = MatureAgentSimplePaymentProfits(context.Background(), 100)
+	require.NoError(t, err)
+	require.NoError(t, DB.First(&account, agent.UserID).Error)
+	assert.Zero(t, account.PaymentPendingQuota)
+	assert.Zero(t, account.PaymentAvailableQuota)
+	assert.EqualValues(t, 14_850_000, account.PaymentDebtQuota)
+}
+
+func TestAgentSimpleExpiredCodeCannotReleaseAnotherCodesCredit(t *testing.T) {
+	root, agent := simpleAccountingFixture(t)
+	_, err := SetAgentSimpleCreditLimit(root, AgentSimpleCreditLimitRequest{RequestID: "a07-expiry-credit", AgentUserID: agent.UserID, LimitQuota: 500, Reason: "Synthetic credit"})
+	require.NoError(t, err)
+	first, err := CreateAgentSimpleCode(agent, AgentSimpleCodeRequest{RequestID: "a07-expiry-first-code", Name: "Expires", Quota: 100, Mode: AgentSimpleCodeCredit})
+	require.NoError(t, err)
+	second, err := CreateAgentSimpleCode(agent, AgentSimpleCodeRequest{RequestID: "a07-expiry-second-code", Name: "Remains valid", Quota: 100, Mode: AgentSimpleCodeCredit})
+	require.NoError(t, err)
+	require.NoError(t, DB.Model(first).Update("expired_time", common.GetTimestamp()-1).Error)
+	_, err = ReleaseExpiredAgentRedemptions(100)
+	require.NoError(t, err)
+	require.NoError(t, DB.First(first, first.Id).Error)
+	_, err = CancelAgentSimpleCode(agent, AgentSimpleCodeCancelRequest{RequestID: "a07-expired-cancel", CodeID: first.Id, Version: int64(first.BudgetVersion), Reason: "Already expired"})
+	require.ErrorIs(t, err, ErrAgentSimpleState)
+	_, err = Redeem(second.Key, agentTestRecipientID)
+	require.NoError(t, err, "another valid code must retain its reserved credit")
+}
+
+func TestAgentSimpleLateVerifiedPaymentIsDeliveredAfterLinkExpiry(t *testing.T) {
+	_, agent := simpleAccountingFixture(t)
+	order, err := CreateAgentSimplePaymentOrder(agent, AgentSimplePaymentRequest{RequestID: "a07-late-payment", Name: "Late callback", Quota: 500_000, SalePriceFen: 120, PaymentMethod: "alipay"}, "a07-late-public", "synthetic-late-payment-token-00000000000000000000000000000", "a07-late-trade", "https://pay.example.test", `{}`, "https://example.test")
+	require.NoError(t, err)
+	require.NoError(t, DB.Model(&AgentSimplePaymentOrder{}).Where("id = ?", order.ID).Update("expires_at", common.GetTimestamp()-1).Error)
+	_, err = ExpireAgentSimplePaymentOrders(context.Background(), 100)
+	require.NoError(t, err)
+	_, err = SettleAgentSimplePaymentByTradeNo("a07-late-trade", "alipay", "1.20")
+	require.NoError(t, err, "a verified customer payment must remain recoverable after local link expiry")
+	var stored AgentSimplePaymentOrder
+	require.NoError(t, DB.First(&stored, order.ID).Error)
+	assert.Equal(t, AgentSimplePaymentPaid, stored.Status)
+	assert.Positive(t, stored.RedemptionID)
+}
+
+func TestAgentSimpleCodeAutomaticallyCombinesOwnBalanceAndCredit(t *testing.T) {
+	root, agent := simpleAccountingFixture(t)
+	require.NoError(t, DB.Model(&AgentSimpleAccount{}).Where("agent_user_id = ?", agent.UserID).Updates(map[string]any{"cash_quota": 50, "credit_limit_quota": 90}).Error)
+	code, err := CreateAgentSimpleCode(agent, AgentSimpleCodeRequest{RequestID: "a07-mixed-sources", Name: "Automatic sources", Quota: 100, Mode: AgentSimpleCodeDirect})
+	require.NoError(t, err)
+	var account AgentSimpleAccount
+	require.NoError(t, DB.First(&account, agent.UserID).Error)
+	assert.Zero(t, account.CashQuota)
+	assert.EqualValues(t, 45, account.CreditReservedQuota)
+	assert.EqualValues(t, 45, code.AgentSimpleCostQuota)
+	_, err = Redeem(code.Key, agentTestRecipientID)
+	require.NoError(t, err)
+	require.NoError(t, DB.First(&account, agent.UserID).Error)
+	assert.Zero(t, account.CreditReservedQuota)
+	assert.EqualValues(t, 45, account.CreditOutstandingQuota)
+	_, err = RepayAgentSimpleCredit(root, AgentSimpleRepaymentRequest{RequestID: "a07-mixed-repay", AgentUserID: agent.UserID, Quota: 45, Reason: "Synthetic paid repayment"})
+	require.NoError(t, err)
+	require.NoError(t, DB.First(&account, agent.UserID).Error)
+	assert.Zero(t, account.CreditOutstandingQuota)
+	assert.EqualValues(t, 90, simpleAvailableCredit(&account))
+}
+
+func TestAgentSimpleRechargeRepaysDiscountedDebtBeforeAddingCashQuota(t *testing.T) {
+	_, agent := simpleAccountingFixture(t)
+	require.NoError(t, DB.Model(&AgentSimpleAccount{}).Where("agent_user_id = ?", agent.UserID).Updates(map[string]any{"credit_limit_quota": 90_000_000, "credit_outstanding_quota": 45_000_000}).Error)
+	require.NoError(t, DB.Create(&AgentSimpleCreditDebt{AgentUserID: agent.UserID, CodeID: 999, Quota: 45_000_000}).Error)
+	require.NoError(t, DB.Create(&TopUp{AgentSimpleTopUp: true, UserId: agent.UserID, Amount: 200, Money: 180, TradeNo: "A07-REPAY-FIRST", PaymentMethod: "alipay", PaymentProvider: PaymentProviderEpay, Status: common.TopUpStatusPending}).Error)
+	for range 2 {
+		_, err := RechargeEpay("A07-REPAY-FIRST", "alipay", "180.00", "")
+		require.NoError(t, err)
+	}
+	var account AgentSimpleAccount
+	require.NoError(t, DB.First(&account, agent.UserID).Error)
+	assert.Zero(t, account.CreditOutstandingQuota)
+	assert.EqualValues(t, 50_000_000, account.CashQuota, "180 paid first repays 90 debt; the remaining 90 funds 100 face value")
+}

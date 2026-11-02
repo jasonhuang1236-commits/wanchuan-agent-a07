@@ -18,6 +18,7 @@ const (
 	InvitationSourceOAuth            = "oauth"
 	InvitationSourceLinuxDO          = "linuxdo"
 	LedgerReasonAgentInvitationBonus = "agent_invitation_bonus"
+	AgentInvitationTestBonusUSD      = 3
 )
 
 var (
@@ -217,32 +218,21 @@ func resolveInviterForInsert(tx *gorm.DB, userID, inviterID int, source string) 
 		InviterId: inviter.Id, InviterUsername: inviter.Username, InviterRole: inviter.Role, Source: source,
 		BonusReason: "inviter_not_agent",
 	}
-	profile, err := LockAgentProfileTx(tx, inviter.Id)
+	active, err := activeAgentSalesTx(tx, inviter.Id)
 	if err != nil {
 		return nil, err
 	}
-	if !profile.Allows(AgentCapabilitySales) {
+	if !active {
 		return invitation, nil
 	}
-	policy, err := readAgentInvitationPolicy(tx)
-	if err != nil {
-		return nil, err
-	}
-	if policy.Quota < 0 || policy.Quota > common.MaxWalletQuota {
-		return nil, ErrAgentInvitationPolicy
-	}
-	invitation.PolicyRevision = policy.Revision
 	switch {
-	case !policy.Enabled:
-		invitation.BonusReason = "policy_disabled"
-	case policy.Quota == 0:
-		invitation.BonusReason = "zero_quota"
 	case !operation_setting.IsPaymentComplianceConfirmed():
 		// Match the existing invitation-reward gate. Attribution still commits,
 		// but later confirmation cannot retroactively award this registration.
 		invitation.BonusReason = "payment_compliance_required"
 	default:
-		invitation.BonusQuota, invitation.BonusReason = policy.Quota, "granted"
+		invitation.BonusQuota = common.QuotaRound(AgentInvitationTestBonusUSD * common.QuotaPerUnit)
+		invitation.BonusReason = "granted"
 	}
 	return invitation, nil
 }

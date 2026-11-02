@@ -104,6 +104,9 @@ const walletUser: UserWalletData = {
 }
 
 const walletSummary: WalletSummary = {
+  referral_available_quota: 1_000_000,
+  referral_total_quota: 3_000_000,
+  referral_invite_count: 2,
   total: 1_200_000,
   paid: 800_000,
   bonus: 200_000,
@@ -117,6 +120,7 @@ const walletSummary: WalletSummary = {
 }
 
 const referralRewards: ReferralCommissionPage = {
+  available_quota: 1_000_000,
   items: [
     {
       id: 1,
@@ -124,6 +128,9 @@ const referralRewards: ReferralCommissionPage = {
       source_name: 'a***',
       paid_quota: 1_000_000,
       reward_quota: 50_000,
+      reversed_quota: 0,
+      status: 'released',
+      matures_at: 0,
       rate: 0.05,
       created_at: 1735689600,
     },

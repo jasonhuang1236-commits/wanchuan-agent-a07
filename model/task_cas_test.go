@@ -13,8 +13,10 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/glebarez/sqlite"
+	mysqldsn "github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -22,12 +24,23 @@ import (
 func TestMain(m *testing.M) {
 	var dialector gorm.Dialector
 	nativeDSN := os.Getenv("TEST_MODEL_POSTGRES_DSN")
+	mysqlDSN := os.Getenv("TEST_MODEL_MYSQL_DSN")
 	if nativeDSN != "" {
 		parsed, err := url.Parse(nativeDSN)
 		if err != nil || !net.ParseIP(parsed.Hostname()).IsLoopback() {
 			panic("TEST_MODEL_POSTGRES_DSN must name a disposable loopback PostgreSQL fixture")
 		}
 		dialector = postgres.New(postgres.Config{DSN: nativeDSN, PreferSimpleProtocol: true})
+	} else if mysqlDSN != "" {
+		config, err := mysqldsn.ParseDSN(mysqlDSN)
+		if err != nil || config.Net != "tcp" {
+			panic("TEST_MODEL_MYSQL_DSN must name a disposable loopback MySQL fixture")
+		}
+		host, _, err := net.SplitHostPort(config.Addr)
+		if err != nil || !net.ParseIP(host).IsLoopback() {
+			panic("TEST_MODEL_MYSQL_DSN must use a loopback TCP address")
+		}
+		dialector = mysql.Open(mysqlDSN)
 	} else {
 		dialector = sqlite.Open(":memory:")
 	}
@@ -44,6 +57,8 @@ func TestMain(m *testing.M) {
 		if err := db.Raw("SHOW server_version_num").Scan(&version).Error; err != nil || version != "180006" {
 			panic("native model tests require PostgreSQL 18.6")
 		}
+	} else if mysqlDSN != "" {
+		common.SetDatabaseTypes(common.DatabaseTypeMySQL, common.DatabaseTypeMySQL)
 	} else {
 		common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	}
@@ -56,7 +71,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic("failed to get sql.DB: " + err.Error())
 	}
-	if nativeDSN != "" {
+	if nativeDSN != "" || mysqlDSN != "" {
 		sqlDB.SetMaxOpenConns(8)
 	} else {
 		sqlDB.SetMaxOpenConns(1)

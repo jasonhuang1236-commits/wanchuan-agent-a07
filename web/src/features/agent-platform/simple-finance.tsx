@@ -1,0 +1,464 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
+
+import { EmptyState } from '@/components/empty-state'
+import { ErrorState } from '@/components/error-state'
+import { SectionPageLayout } from '@/components/layout'
+import { LoadingState } from '@/components/loading-state'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { useRequestId } from '@/features/agent-platform/hooks/use-request-id'
+import { formatQuota, parseQuotaFromDollars } from '@/lib/format'
+
+import { ActionForm, type ActionField } from './components/action-form'
+import { SimpleCodeRecords } from './components/simple-code-records'
+import {
+  getSimpleAgents,
+  adjustSimpleBalance,
+  repaySimpleCredit,
+  recordSimpleWithdrawal,
+  setSimpleCreditLimit,
+  settleSimpleExit,
+  updateSimpleStatus,
+  type SimpleAgentRow,
+} from './simple-root-api'
+
+const actionFields: Record<string, ActionField[]> = {
+  adjust: [
+    {
+      name: 'delta',
+      label: 'Balance adjustment ($)',
+      kind: 'text',
+      validate: (value) =>
+        /^-?\d+(\.\d{1,6})?$/.test(String(value)) && Number(value) !== 0
+          ? undefined
+          : 'Enter a valid amount',
+    },
+    { name: 'reason', label: 'Reason', kind: 'textarea', max: 255 },
+  ],
+  credit: [
+    { name: 'limit', label: 'Credit limit ($)', kind: 'integer', min: 0 },
+    { name: 'reason', label: 'Reason', kind: 'textarea', max: 255 },
+  ],
+  repay: [
+    { name: 'quota', label: 'Repayment ($)', kind: 'integer', min: 1 },
+    { name: 'reason', label: 'Reason', kind: 'textarea', max: 255 },
+  ],
+  withdrawal: [
+    { name: 'referral', label: 'Referral reward ($)', kind: 'integer', min: 0 },
+    {
+      name: 'payment',
+      label: 'Payment-code profit ($)',
+      kind: 'integer',
+      min: 0,
+    },
+    { name: 'reason', label: 'Reason', kind: 'textarea', max: 255 },
+    { name: 'evidence', label: 'Support evidence', kind: 'textarea', max: 255 },
+  ],
+  exit: [
+    { name: 'quota', label: 'Amount ($)', kind: 'integer', min: 1 },
+    {
+      name: 'source',
+      label: 'Source',
+      kind: 'select',
+      options: [
+        { value: 'cash', label: 'Cash recharge' },
+        { value: 'income', label: 'Transferred income' },
+      ],
+    },
+    {
+      name: 'target',
+      label: 'Target',
+      kind: 'select',
+      options: [
+        { value: 'wallet', label: 'User wallet' },
+        { value: 'refund', label: 'Cash refund' },
+      ],
+    },
+    { name: 'reason', label: 'Reason', kind: 'textarea', max: 255 },
+    { name: 'evidence', label: 'Support evidence', kind: 'textarea', max: 255 },
+  ],
+}
+
+export function SimpleAgentFinance() {
+  const { t } = useTranslation()
+  const client = useQueryClient()
+  const query = useQuery({
+    queryKey: ['simple-root', 'agents'],
+    queryFn: () => getSimpleAgents({ p: 1, page_size: 100 }),
+  })
+  const [selected, setSelected] = useState<SimpleAgentRow | null>(null)
+  const [action, setAction] = useState<string | null>(null)
+  const [recordsAgent, setRecordsAgent] = useState<number | undefined>()
+  const [openAgent, setOpenAgent] = useState(false)
+  const refresh = async () => {
+    await client.invalidateQueries({ queryKey: ['simple-root'] })
+    await client.invalidateQueries({ queryKey: ['agent-platform'] })
+  }
+
+  if (query.isPending) return <LoadingState />
+  if (query.isError) return <ErrorState onRetry={() => void query.refetch()} />
+  const agents = query.data?.items ?? []
+  return (
+    <>
+      <SectionPageLayout>
+        <SectionPageLayout.Title>
+          {t('Agent management')}
+        </SectionPageLayout.Title>
+        <SectionPageLayout.Content>
+          <div className='space-y-4'>
+            <Card>
+              <CardHeader>
+                <CardTitle>{t('Agents')}</CardTitle>
+                <Button className='w-fit' onClick={() => setOpenAgent(true)}>
+                  {t('Open agent')}
+                </Button>
+              </CardHeader>
+              <CardContent className='space-y-3'>
+                {!agents.length ? (
+                  <EmptyState title={t('No agents found')} />
+                ) : (
+                  agents.map((agent) => (
+                    <div
+                      key={agent.agent_user_id}
+                      className='flex flex-wrap items-center gap-3 rounded-lg border p-3'
+                    >
+                      <div className='min-w-44 flex-1'>
+                        <div className='font-medium'>{agent.username}</div>
+                        <div className='text-muted-foreground text-xs'>
+                          {agent.status}
+                          {agent.inactive ? ` · ${t('Inactive')}` : ''}
+                        </div>
+                      </div>
+                      <div className='text-xs'>
+                        <div>
+                          {t('Agent balance')}:{' '}
+                          {formatQuota(agent.available_quota)}
+                        </div>
+                        <div>
+                          {t('Available credit')}:{' '}
+                          {formatQuota(agent.available_credit_quota)}
+                        </div>
+                        <div>
+                          {t('Amount due')}:{' '}
+                          {formatQuota(agent.amount_due_quota)}
+                        </div>
+                      </div>
+                      <div className='flex flex-wrap gap-2'>
+                        <Button
+                          size='sm'
+                          variant='outline'
+                          onClick={() => {
+                            setSelected(agent)
+                            setAction(
+                              agent.status === 'active' ? 'pause' : 'resume'
+                            )
+                          }}
+                        >
+                          {agent.status === 'active' ? t('Pause') : t('Resume')}
+                        </Button>
+                        <Button
+                          size='sm'
+                          variant='outline'
+                          onClick={() => {
+                            setSelected(agent)
+                            setAction('adjust')
+                          }}
+                        >
+                          {t('Adjust')}
+                        </Button>
+                        <Button
+                          size='sm'
+                          variant='outline'
+                          onClick={() => {
+                            setSelected(agent)
+                            setAction('credit')
+                          }}
+                        >
+                          {t('Credit limit')}
+                        </Button>
+                        <Button
+                          size='sm'
+                          variant='outline'
+                          onClick={() => {
+                            setSelected(agent)
+                            setAction('repay')
+                          }}
+                        >
+                          {t('Repayment')}
+                        </Button>
+                        <Button
+                          size='sm'
+                          variant='outline'
+                          onClick={() => setRecordsAgent(agent.agent_user_id)}
+                        >
+                          {t('Codes')}
+                        </Button>
+                        <Button
+                          size='sm'
+                          variant='outline'
+                          onClick={() => {
+                            setSelected(agent)
+                            setAction('withdrawal')
+                          }}
+                        >
+                          {t('Record withdrawal')}
+                        </Button>
+                        {agent.status === 'paused' && (
+                          <Button
+                            size='sm'
+                            variant='outline'
+                            onClick={() => {
+                              setSelected(agent)
+                              setAction('cancel')
+                            }}
+                          >
+                            {t('Cancel agent')}
+                          </Button>
+                        )}
+                        {agent.status !== 'active' && (
+                          <Button
+                            size='sm'
+                            variant='outline'
+                            onClick={() => {
+                              setSelected(agent)
+                              setAction('exit')
+                            }}
+                          >
+                            {t('Settle remaining balance')}
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+            {recordsAgent ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>
+                    {t('Redemption records')} ·{' '}
+                    {
+                      agents.find((a) => a.agent_user_id === recordsAgent)
+                        ?.username
+                    }
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <SimpleCodeRecords agentUserId={recordsAgent} />
+                </CardContent>
+              </Card>
+            ) : null}
+          </div>
+        </SectionPageLayout.Content>
+      </SectionPageLayout>
+      {openAgent && (
+        <OpenAgentForm onClose={() => setOpenAgent(false)} onDone={refresh} />
+      )}
+      {selected &&
+      action &&
+      action !== 'pause' &&
+      action !== 'resume' &&
+      action !== 'cancel' ? (
+        <RootActionForm
+          agent={selected}
+          action={action}
+          onClose={() => {
+            setAction(null)
+            setSelected(null)
+          }}
+          onDone={refresh}
+        />
+      ) : null}
+      {selected &&
+      (action === 'pause' || action === 'resume' || action === 'cancel') ? (
+        <RootStatusForm
+          agent={selected}
+          status={
+            { pause: 'paused', resume: 'active', cancel: 'cancelled' }[action]
+          }
+          onClose={() => {
+            setAction(null)
+            setSelected(null)
+          }}
+          onDone={refresh}
+        />
+      ) : null}
+    </>
+  )
+}
+
+function RootStatusForm(props: {
+  agent: SimpleAgentRow
+  status: string
+  onClose: () => void
+  onDone: () => Promise<void>
+}) {
+  const { t } = useTranslation()
+  const requestId = useRequestId()
+  return (
+    <ActionForm
+      title={t('Change agent status')}
+      fields={[
+        { name: 'reason', label: 'Reason', kind: 'textarea', max: 255 },
+        {
+          name: 'confirmed',
+          label: 'I confirm this change and its financial impact',
+          kind: 'checkbox',
+          mustBeTrue: true,
+        },
+      ]}
+      onClose={props.onClose}
+      onSubmit={async (values) => {
+        await updateSimpleStatus({
+          request_id: requestId(values),
+          agent_user_id: props.agent.agent_user_id,
+          status: props.status,
+          reason: String(values.reason),
+        })
+        await props.onDone()
+        props.onClose()
+      }}
+      submitLabel={t('Save')}
+    />
+  )
+}
+
+function RootActionForm(props: {
+  agent: SimpleAgentRow
+  action: string
+  onClose: () => void
+  onDone: () => Promise<void>
+}) {
+  const { t } = useTranslation()
+  const requestId = useRequestId()
+  const fields = [
+    ...actionFields[props.action],
+    {
+      name: 'confirmed',
+      label: 'I confirm this change and its financial impact',
+      kind: 'checkbox' as const,
+      mustBeTrue: true,
+    },
+  ]
+  return (
+    <ActionForm
+      title={t('Record agent finance action')}
+      fields={fields}
+      initial={
+        props.action === 'exit'
+          ? { source: 'cash', target: 'wallet' }
+          : undefined
+      }
+      onClose={props.onClose}
+      onSubmit={async (values) => {
+        const id = requestId(values)
+        const quota = (name: string) =>
+          parseQuotaFromDollars(Number(values[name] ?? 0))
+        if (props.action === 'adjust') {
+          await adjustSimpleBalance({
+            request_id: id,
+            agent_user_id: props.agent.agent_user_id,
+            delta: quota('delta'),
+            reason: String(values.reason),
+          })
+        }
+        if (props.action === 'credit') {
+          await setSimpleCreditLimit({
+            request_id: id,
+            agent_user_id: props.agent.agent_user_id,
+            limit_quota: quota('limit'),
+            reason: String(values.reason),
+          })
+        }
+        if (props.action === 'repay') {
+          await repaySimpleCredit({
+            request_id: id,
+            agent_user_id: props.agent.agent_user_id,
+            quota: quota('quota'),
+            reason: String(values.reason),
+          })
+        }
+        if (props.action === 'withdrawal') {
+          await recordSimpleWithdrawal({
+            request_id: id,
+            user_id: props.agent.agent_user_id,
+            referral_quota: quota('referral'),
+            payment_quota: quota('payment'),
+            reason: String(values.reason),
+            evidence: String(values.evidence),
+          })
+        }
+        if (props.action === 'exit') {
+          await settleSimpleExit({
+            request_id: id,
+            agent_user_id: props.agent.agent_user_id,
+            quota: quota('quota'),
+            source: String(values.source),
+            target: String(values.target),
+            reason: String(values.reason),
+            evidence: String(values.evidence),
+          })
+        }
+        await props.onDone()
+        props.onClose()
+      }}
+      submitLabel={t('Save')}
+    />
+  )
+}
+
+function OpenAgentForm(props: {
+  onClose: () => void
+  onDone: () => Promise<void>
+}) {
+  const { t } = useTranslation()
+  const requestId = useRequestId()
+  return (
+    <ActionForm
+      title={t('Open agent')}
+      fields={[
+        { name: 'user_id', label: 'User ID', kind: 'integer', min: 1 },
+        { name: 'reason', label: 'Reason', kind: 'textarea', max: 255 },
+        {
+          name: 'confirmed',
+          label: 'I confirm this change and its financial impact',
+          kind: 'checkbox',
+          mustBeTrue: true,
+        },
+      ]}
+      onClose={props.onClose}
+      onSubmit={async (values) => {
+        await updateSimpleStatus({
+          request_id: requestId(values),
+          agent_user_id: Number(values.user_id),
+          status: 'active',
+          reason: String(values.reason),
+        })
+        await props.onDone()
+        props.onClose()
+      }}
+      submitLabel={t('Save')}
+    />
+  )
+}

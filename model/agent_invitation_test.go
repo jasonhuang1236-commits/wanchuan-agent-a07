@@ -170,7 +170,7 @@ func TestAgentInvitationPolicyRejectsConcurrentLogoutAndRoleCycle(t *testing.T) 
 	}
 }
 
-func TestAgentInvitationValidatesInviterAndPolicyAtCreation(t *testing.T) {
+func TestAgentInvitationValidatesInviterAndFixedA07GrantAtCreation(t *testing.T) {
 	for _, tc := range []struct {
 		name             string
 		role, status     int
@@ -178,8 +178,8 @@ func TestAgentInvitationValidatesInviterAndPolicyAtCreation(t *testing.T) {
 		wantInvitation   bool
 		wantBonus        int
 	}{
-		{"enabled_agent", common.RoleAgentUser, common.UserStatusEnabled, false, true, true, 321},
-		{"policy_disabled", common.RoleAgentUser, common.UserStatusEnabled, false, false, true, 0},
+		{"enabled_agent", common.RoleAgentUser, common.UserStatusEnabled, false, true, true, 1_500_000},
+		{"retired_policy_does_not_disable_a07", common.RoleAgentUser, common.UserStatusEnabled, false, false, true, 1_500_000},
 		{"common_inviter", common.RoleCommonUser, common.UserStatusEnabled, false, true, true, 0},
 		{"admin_inviter", common.RoleAdminUser, common.UserStatusEnabled, false, true, true, 0},
 		{"root_inviter", common.RoleRootUser, common.UserStatusEnabled, false, true, true, 0},
@@ -251,7 +251,7 @@ func TestAgentInvitationSnapshotAndFinalizerReplayDoNotRegrant(t *testing.T) {
 	require.NotNil(t, user.Invitation)
 	assert.Equal(t, agent.Username, user.Invitation.InviterUsername)
 	assert.Equal(t, common.RoleAgentUser, user.Invitation.InviterRole)
-	assert.Equal(t, 500, user.Invitation.BonusQuota)
+	assert.Equal(t, 1_500_000, user.Invitation.BonusQuota)
 	var invitation AgentInvitation
 	require.NoError(t, DB.Where("user_id = ?", user.Id).First(&invitation).Error)
 	require.ErrorIs(t, DB.Model(&invitation).Update("inviter_id", root.Id).Error, ErrAgentInvitationImmutable)
@@ -259,10 +259,36 @@ func TestAgentInvitationSnapshotAndFinalizerReplayDoNotRegrant(t *testing.T) {
 	duplicate.Id = 0
 	require.Error(t, DB.Create(&duplicate).Error, "one permanent attribution per new user")
 	stored := getUserBalances(t, user.Id)
-	assert.Equal(t, 500, stored.QuotaBonus)
+	assert.Equal(t, 1_500_000, stored.QuotaBonus)
 	assert.EqualValues(t, 1, countLedgerRows(t, fmt.Sprintf("agent_invitation_bonus:%d", user.Id)))
 	inviter := getUserBalances(t, agent.Id)
 	assert.Equal(t, 1, inviter.AffCount)
+}
+
+func TestAgentInvitationA07PauseAndCancellationDoNotGrantNewTestCredit(t *testing.T) {
+	_, agent := setupAgentInvitationTest(t)
+	require.NoError(t, DB.Create(&AgentSimpleAccount{AgentUserID: agent.Id, Status: AgentSimpleStatusActive, Version: 1}).Error)
+	for i, status := range []string{AgentSimpleStatusActive, AgentSimpleStatusPaused, AgentSimpleStatusCancelled, AgentSimpleStatusActive} {
+		require.NoError(t, DB.Model(&AgentSimpleAccount{}).Where("agent_user_id = ?", agent.Id).Update("status", status).Error)
+		user := User{Username: fmt.Sprintf("a07-status-invitee-%d", i)}
+		require.NoError(t, user.Insert(agent.Id))
+		user.FinishInsert(agent.Id)
+		user.FinalizeOAuthUserCreation(agent.Id)
+		want := 0
+		if status == AgentSimpleStatusActive {
+			want = 1_500_000
+		}
+		assert.Equal(t, want, getUserBalances(t, user.Id).QuotaBonus)
+		assert.Equal(t, agent.Id, getUserBalances(t, user.Id).InviterId)
+		var grants int64
+		require.NoError(t, DB.Model(&BalanceLedger{}).Where("user_id = ? AND reason = ?", user.Id, LedgerReasonAgentInvitationBonus).Count(&grants).Error)
+		if want > 0 {
+			assert.EqualValues(t, 1, grants)
+		} else {
+			assert.Zero(t, grants)
+		}
+	}
+	assert.Equal(t, 4, getUserBalances(t, agent.Id).AffCount)
 }
 
 func TestAgentInvitationRollbackAndRetryAreAtomic(t *testing.T) {
@@ -294,7 +320,7 @@ func TestAgentInvitationRollbackAndRetryAreAtomic(t *testing.T) {
 			assert.Zero(t, inviter.AffCount)
 			require.NoError(t, DB.Callback().Create().Remove(callback))
 			require.NoError(t, user.Insert(agent.Id))
-			assert.Equal(t, 600, getUserBalances(t, user.Id).QuotaBonus)
+			assert.Equal(t, 1_500_000, getUserBalances(t, user.Id).QuotaBonus)
 			assert.EqualValues(t, 1, countLedgerRows(t, fmt.Sprintf("agent_invitation_bonus:%d", user.Id)))
 		})
 	}
@@ -325,7 +351,7 @@ func TestAgentInvitationOAuthBindingRollbackAndLinuxDOStacking(t *testing.T) {
 	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error { return linuxUser.InsertLinuxDOWithTx(tx, agent.Id, "991001") }))
 	linuxBonus := common.QuotaRound(common.LinuxDOSignupBonusUSD * common.QuotaPerUnit)
 	stored := getUserBalances(t, linuxUser.Id)
-	assert.Equal(t, linuxBonus+700, stored.QuotaBonus)
+	assert.Equal(t, linuxBonus+1_500_000, stored.QuotaBonus)
 	assertQuotaInvariant(t, stored)
 	var rows []BalanceLedger
 	require.NoError(t, DB.Where("user_id = ?", linuxUser.Id).Order("id").Find(&rows).Error)
@@ -335,18 +361,18 @@ func TestAgentInvitationOAuthBindingRollbackAndLinuxDOStacking(t *testing.T) {
 	invitation = AgentInvitation{}
 	require.NoError(t, DB.Where("user_id = ?", linuxUser.Id).First(&invitation).Error)
 	assert.Equal(t, InvitationSourceLinuxDO, invitation.Source)
-	assert.Equal(t, 700, invitation.BonusQuota)
+	assert.Equal(t, 1_500_000, invitation.BonusQuota)
 	_, err = UpdateAgentInvitationPolicy(root.Id, true, common.MaxWalletQuota)
 	require.NoError(t, err)
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		return (&User{Username: "linuxdo-overflow"}).InsertLinuxDOWithTx(tx, agent.Id, "991002")
 	})
-	require.ErrorIs(t, err, ErrWalletQuotaLimitExceeded)
+	require.NoError(t, err, "legacy policy quota does not override the fixed A07 grant")
 	require.NoError(t, DB.Model(&User{}).Where("username = ?", "linuxdo-overflow").Count(&count).Error)
-	assert.Zero(t, count)
+	assert.EqualValues(t, 1, count)
 	require.NoError(t, DB.Model(&AgentInvitation{}).Count(&count).Error)
-	assert.EqualValues(t, 2, count)
-	assert.Equal(t, 2, getUserBalances(t, agent.Id).AffCount)
+	assert.EqualValues(t, 3, count)
+	assert.Equal(t, 3, getUserBalances(t, agent.Id).AffCount)
 }
 
 func TestAgentInvitationConcurrentDuplicateRegistrationHasOneGrant(t *testing.T) {
@@ -374,12 +400,12 @@ func TestAgentInvitationConcurrentDuplicateRegistrationHasOneGrant(t *testing.T)
 	var users []User
 	require.NoError(t, DB.Where("username = ?", "same-new-user").Find(&users).Error)
 	require.Len(t, users, 1)
-	assert.Equal(t, 250, users[0].QuotaBonus)
+	assert.Equal(t, 1_500_000, users[0].QuotaBonus)
 	assertQuotaInvariant(t, users[0])
 	var invitations []AgentInvitation
 	require.NoError(t, DB.Find(&invitations).Error)
 	require.Len(t, invitations, 1)
-	assert.Equal(t, 250, invitations[0].BonusQuota)
+	assert.Equal(t, 1_500_000, invitations[0].BonusQuota)
 	assert.EqualValues(t, 1, countLedgerRows(t, fmt.Sprintf("agent_invitation_bonus:%d", users[0].Id)))
 	assert.Equal(t, 1, getUserBalances(t, agent.Id).AffCount)
 }
@@ -456,5 +482,5 @@ func TestAgentInvitationMigrationPreservesLegacyAndUniqueAttribution(t *testing.
 	var count int64
 	require.NoError(t, DB.Model(&AgentInvitation{}).Count(&count).Error)
 	assert.EqualValues(t, 1, count)
-	assert.Equal(t, 73, getUserBalances(t, user.Id).QuotaBonus)
+	assert.Equal(t, 1_500_000, getUserBalances(t, user.Id).QuotaBonus)
 }

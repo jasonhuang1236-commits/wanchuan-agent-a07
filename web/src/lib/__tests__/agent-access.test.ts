@@ -39,12 +39,12 @@ describe('agent profile permissions', () => {
       hasAgentAdministration({ ...user, permissions: { agent_admin: true } })
     ).toBe(false)
   })
-  it('requires the server capability for administrator finance access', () => {
+  it('reserves agent finance access for root', () => {
     expect(hasAgentAdministration({ ...user, role: 10 })).toBe(false)
     expect(
       hasAgentAdministration({
         ...user,
-        role: 10,
+        role: 100,
         permissions: { agent_admin: true },
       })
     ).toBe(true)

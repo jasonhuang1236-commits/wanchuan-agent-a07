@@ -23,7 +23,6 @@ import (
 	supportmodule "github.com/QuantumNous/new-api/modules/chuanapi/support"
 	walletmodule "github.com/QuantumNous/new-api/modules/chuanapi/wallet"
 	walletroutes "github.com/QuantumNous/new-api/modules/chuanapi/wallet/routes"
-	"github.com/QuantumNous/new-api/pkg/lifecycle"
 	"github.com/QuantumNous/new-api/pkg/moneyport"
 )
 
@@ -93,6 +92,3 @@ func Register(reg *extension.Registry) error {
 	}
 	return agentmodule.Register(reg)
 }
-
-// StartRuntimeWorkers starts module-owned, drain-aware accounting workers.
-func StartRuntimeWorkers(workers *lifecycle.Group) { agentmodule.StartRuntimeWorkers(workers) }

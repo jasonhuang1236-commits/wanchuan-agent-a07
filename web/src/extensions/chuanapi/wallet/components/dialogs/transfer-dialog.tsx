@@ -29,10 +29,6 @@ import {
   parseQuotaFromDollars,
   quotaUnitsToDollars,
 } from '@/lib/format'
-import {
-  DEFAULT_CURRENCY_CONFIG,
-  useSystemConfigStore,
-} from '@/stores/system-config-store'
 
 interface TransferDialogProps {
   open: boolean
@@ -50,12 +46,7 @@ export function TransferDialog({
   transferring,
 }: TransferDialogProps) {
   const { t } = useTranslation()
-  const currencyConfig = useSystemConfigStore((state) => state.config.currency)
-  const minimumQuota = Math.ceil(
-    currencyConfig.quotaPerUnit > 0
-      ? currencyConfig.quotaPerUnit
-      : DEFAULT_CURRENCY_CONFIG.quotaPerUnit
-  )
+  const minimumQuota = 1
   const minimumAmount = quotaUnitsToDollars(minimumQuota)
   const maximumAmount = quotaUnitsToDollars(availableQuota)
   const [amount, setAmount] = useState(minimumAmount)
@@ -135,7 +126,7 @@ export function TransferDialog({
             onChange={(e) => setAmount(Number(e.target.value))}
             min={minimumAmount}
             max={maximumAmount}
-            step={minimumAmount}
+            step={0.01}
             className='font-mono text-lg'
           />
           <p className='text-muted-foreground text-xs'>

@@ -315,6 +315,9 @@ func UpdateRedemptionScoped(scope RedemptionScope, request RedemptionUpdateReque
 		if replay {
 			return requireRedemptionActorTx(tx, scope, 0)
 		}
+		if redemption.AgentSimpleMode != "" {
+			return ErrAgentSimpleState
+		}
 
 		var authorizationContext AgentTransactionContext
 		if scope.Identity != nil {
@@ -449,7 +452,7 @@ func DeleteRedemptionsScoped(scope RedemptionScope, ids []int, invalidOnly bool,
 			query = query.Where("budget_agent_id = ?", agentFilter[0])
 		}
 		if invalidOnly {
-			query = query.Where("customer_user_id = 0 AND delivery_id = 0 AND source_protected = false").Where("(status IN ? OR (status = ? AND expired_time != 0 AND expired_time < ?))", []int{common.RedemptionCodeStatusUsed, common.RedemptionCodeStatusDisabled}, common.RedemptionCodeStatusEnabled, common.GetTimestamp()).Limit(MaxRedemptionDeleteBatchSize)
+			query = query.Where("agent_simple_mode = '' AND customer_user_id = 0 AND delivery_id = 0 AND source_protected = false").Where("(status IN ? OR (status = ? AND expired_time != 0 AND expired_time < ?))", []int{common.RedemptionCodeStatusUsed, common.RedemptionCodeStatusDisabled}, common.RedemptionCodeStatusEnabled, common.GetTimestamp()).Limit(MaxRedemptionDeleteBatchSize)
 		} else {
 			query = query.Where("id IN ?", ids)
 		}
@@ -489,6 +492,12 @@ func DeleteRedemptionsScoped(scope RedemptionScope, ids []int, invalidOnly bool,
 		// Foreign IDs are never returned; only matching own rows are affected.
 		for i := range rows {
 			row := &rows[i]
+			if row.AgentSimpleMode != "" {
+				if invalidOnly {
+					continue
+				}
+				return ErrAgentSimpleState
+			}
 			if row.CustomerUserID > 0 || row.DeliveryID > 0 || row.SourceProtected {
 				if invalidOnly {
 					continue
@@ -568,7 +577,11 @@ func ReleaseExpiredAgentRedemptions(limit int) (int64, error) {
 			if row.Status == common.RedemptionCodeStatusUsed || row.UsedUserId != 0 || row.RedeemedTime != 0 {
 				return ErrAgentQuotaInvariant
 			}
-			if err := updateRedemptionBudgetTx(tx, &row, 0, 0, false, "expire"); err != nil {
+			if row.AgentSimpleMode != "" {
+				if err := ExpireAgentSimpleCodeTx(tx, &row, 0); err != nil {
+					return err
+				}
+			} else if err := updateRedemptionBudgetTx(tx, &row, 0, 0, false, "expire"); err != nil {
 				return err
 			}
 			changed = true

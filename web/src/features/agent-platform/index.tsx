@@ -18,12 +18,21 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
+import {
+  ArrowUpRight,
+  CircleDollarSign,
+  HandCoins,
+  Ticket,
+  WalletCards,
+} from 'lucide-react'
+import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { EmptyState } from '@/components/empty-state'
 import { ErrorState } from '@/components/error-state'
 import { SectionPageLayout } from '@/components/layout'
 import { LoadingState } from '@/components/loading-state'
-import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
@@ -31,288 +40,287 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { extensionWalletPage } from '@/extensions'
+import { getRedemptions } from '@/features/redemption-codes/api'
+import { REDEMPTION_STATUSES } from '@/features/redemption-codes/constants'
+import { isRedemptionExpired } from '@/features/redemption-codes/lib'
+import type { Redemption } from '@/features/redemption-codes/types'
+import { formatQuota, formatTimestampToDate } from '@/lib/format'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { getPlatform } from './api'
-import { CampaignPanel } from './components/campaign'
-import { Commissions } from './components/commissions'
-import { ContributionsPanel } from './components/contributions'
-import { CreditPanel } from './components/credit'
-import { Deliveries } from './components/deliveries'
-import { DepositPanel } from './components/deposits'
-import { FundLedgerTable } from './components/fund-accounting'
-import { FundBatches } from './components/fund-batches'
-import { GovernancePanel } from './components/governance'
-import { PendingOperations } from './components/pending-operations'
-import { PolicyPanel } from './components/policy-panel'
-import { PurchaseRefunds } from './components/purchase-refunds'
-import { Purchases } from './components/purchases'
-import { BusinessState } from './components/values'
-import { Withdrawals } from './components/withdrawals'
-import { portalSections, type PortalSection } from './sections'
-import type { AgentPolicy, PlatformSelf } from './types'
+import { SimpleCodeForm } from './components/simple-code-form'
+import { SimplePaymentForm } from './components/simple-payment-form'
+import { SimpleRechargeForm } from './components/simple-recharge-form'
+import { getSimpleAgentBalance } from './simple-api'
+import type { PlatformSelf } from './types'
 
-export function AgentPortal(props: {
-  section: PortalSection
-  onSectionChange: (section: PortalSection) => void
-}) {
+export function AgentPortal() {
   const { t } = useTranslation()
-  const userId = useAuthStore((state) => state.auth.user?.id)
+  const user = useAuthStore((state) => state.auth.user)
+  const userId = user?.id
   const self = useQuery({
     queryKey: ['agent-platform', userId, 'self'],
     queryFn: ({ signal }) =>
       getPlatform<PlatformSelf>('/self', undefined, signal),
   })
-  const policy = useQuery({
-    queryKey: ['agent-platform', userId, 'policy'],
-    queryFn: ({ signal }) =>
-      getPlatform<AgentPolicy>('/policy/current', undefined, signal),
+  const balance = useQuery({
+    queryKey: ['agent-platform', userId, 'simple-balance'],
+    queryFn: ({ signal }) => getSimpleAgentBalance(signal),
+    enabled: !!userId,
   })
-  if (self.isPending || policy.isPending) return <LoadingState />
-  if (self.isError || policy.isError || !self.data || !policy.data) {
+  const recent = useQuery({
+    queryKey: ['agent-platform', userId, 'recent-redemptions'],
+    queryFn: async () => {
+      const response = await getRedemptions({
+        p: 1,
+        page_size: 5,
+        agent_user_id: userId,
+      })
+      if (!response.success) throw new Error('Redemption records unavailable')
+      return response.data
+    },
+    enabled: !!userId,
+  })
+  const RewardsPanel = extensionWalletPage().referralPanel
+  const [simpleCodeOpen, setSimpleCodeOpen] = useState(false)
+  const [simpleRechargeOpen, setSimpleRechargeOpen] = useState(false)
+  const [simplePaymentOpen, setSimplePaymentOpen] = useState(false)
+
+  if (self.isPending || balance.isPending) {
+    return <LoadingState />
+  }
+  if (self.isError || balance.isError || !self.data || !balance.data) {
     return (
       <ErrorState
         onRetry={() => {
           void self.refetch()
-          void policy.refetch()
+          void balance.refetch()
         }}
       />
     )
   }
-  const account = self.data
-  const current = policy.data
-  const labels: Record<PortalSection, string> = {
-    overview: t('Overview'),
-    governance: t('Qualification dossier'),
-    campaigns: t('Campaigns'),
-    contributions: t('Invitation contributions'),
-    credit: t('Credit and receivables'),
-    deposits: t('Deposits'),
-    purchases: t('Procurement'),
-    batches: t('Funding batches'),
-    ledger: t('Procurement ledger'),
-    deliveries: t('Customer deliveries'),
-    refunds: t('Purchase refunds'),
-    commissions: t('Commissions'),
-    withdrawals: t('Withdrawals'),
-    policy: t('Current policy'),
+
+  const account = balance.data
+  const redemptions = recent.data?.items ?? []
+  let recentContent
+  if (recent.isLoading) {
+    recentContent = <LoadingState inline />
+  } else if (redemptions.length === 0) {
+    recentContent = (
+      <EmptyState
+        className='min-h-32'
+        title={t('No redemption codes yet')}
+        description={t(
+          'Open the code center to issue your first customer code.'
+        )}
+      />
+    )
+  } else {
+    recentContent = (
+      <div className='divide-border overflow-hidden rounded-lg border'>
+        {redemptions.map((row) => (
+          <RecentRedemption key={row.id} row={row} />
+        ))}
+      </div>
+    )
   }
-  const sections = portalSections.filter(
-    (section) =>
-      account.capabilities.history ||
-      [
-        'overview',
-        'governance',
-        'campaigns',
-        'contributions',
-        'commissions',
-        'withdrawals',
-        'policy',
-      ].includes(section)
-  )
-  const selected = sections.includes(props.section) ? props.section : 'overview'
   return (
-    <SectionPageLayout>
-      <SectionPageLayout.Title>
-        {t('Agent services & commissions')}
-      </SectionPageLayout.Title>
-      <SectionPageLayout.Content>
-        <div className='flex flex-col gap-5'>
-          <PendingOperations key={userId} />
-          <p className='text-muted-foreground text-sm'>
-            {t(
-              'One ordinary user account, with separate business eligibility and separate financial ledgers.'
-            )}
-          </p>
-          <Tabs
-            value={selected}
-            onValueChange={(value) => {
-              if (sections.includes(value as PortalSection)) {
-                props.onSectionChange(value as PortalSection)
-              }
-            }}
-          >
-            <TabsList
-              className='h-auto max-w-full flex-wrap'
-              aria-label={t('Agent portal sections')}
-            >
-              {sections.map((section) => (
-                <TabsTrigger key={section} value={section}>
-                  {labels[section]}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-            <TabsContent value='overview'>
-              <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
-                <Card>
-                  <CardHeader>
-                    <CardTitle>{t('Business eligibility')}</CardTitle>
-                    <CardDescription>
-                      {t(
-                        'Business freezes never mean your ordinary user account is banned.'
-                      )}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    {account.profile ? (
-                      <dl className='grid grid-cols-2 gap-3 text-sm'>
-                        <div>
-                          <dt>{t('Eligibility')}</dt>
-                          <dd>
-                            <BusinessState value={account.profile.status} />
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>{t('Permission version')}</dt>
-                          <dd>{account.profile.version}</dd>
-                        </div>
-                        <div>
-                          <dt>{t('Sales freeze')}</dt>
-                          <dd>
-                            {account.profile.sales_frozen
-                              ? t('Frozen')
-                              : t('Not frozen')}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>{t('Settlement freeze')}</dt>
-                          <dd>
-                            {account.profile.settlement_frozen
-                              ? t('Frozen')
-                              : t('Not frozen')}
-                          </dd>
-                        </div>
-                      </dl>
-                    ) : (
-                      <p>
+    <>
+      <SectionPageLayout>
+        <SectionPageLayout.Title>{t('Agent Overview')}</SectionPageLayout.Title>
+        <SectionPageLayout.Content>
+          <div className='mx-auto flex w-full max-w-[1440px] flex-col gap-4'>
+            <div className='grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]'>
+              <Card className='overflow-hidden border-sky-200/70 bg-gradient-to-br from-sky-950 via-sky-900 to-cyan-900 py-0 text-white shadow-lg'>
+                <CardHeader className='border-b border-white/10 py-5'>
+                  <div className='flex flex-wrap items-start justify-between gap-3'>
+                    <div>
+                      <CardTitle className='text-xl'>
+                        {t('Agent balance')}
+                      </CardTitle>
+                      <CardDescription className='text-sky-100/75'>
                         {t(
-                          'No agent eligibility is enabled. Ordinary invitation commissions, when configured, are still available to eligible users.'
+                          'Use this balance to issue redemption codes for customers.'
                         )}
-                      </p>
-                    )}
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardHeader>
-                    <CardTitle>
-                      {t('Your ordinary account remains available')}
-                    </CardTitle>
-                    <CardDescription>
-                      {t(
-                        'Procurement quota is not your consumption wallet. Self-use requires an explicit transfer; old disabled API keys are not restored.'
-                      )}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <nav
-                      className='flex flex-wrap gap-4'
-                      aria-label={t('Ordinary user services')}
+                      </CardDescription>
+                    </div>
+                    <WalletCards
+                      className='size-8 text-cyan-200'
+                      aria-hidden='true'
+                    />
+                  </div>
+                </CardHeader>
+                <CardContent className='space-y-5 p-5'>
+                  <dl className='grid grid-cols-2 gap-4 sm:grid-cols-3'>
+                    <Metric
+                      label={t('Agent balance')}
+                      value={formatQuota(account.available_quota)}
+                      emphasis
+                    />
+                    <Metric
+                      label={t('Available credit')}
+                      value={formatQuota(account.available_credit_quota)}
+                    />
+                    <Metric
+                      label={t('Amount due')}
+                      value={formatQuota(account.amount_due_quota)}
+                    />
+                    <Metric
+                      label={t('Payment income available')}
+                      value={formatQuota(account.payment_available_quota)}
+                    />
+                  </dl>
+                  <div className='flex flex-wrap gap-2'>
+                    <Button
+                      className='bg-white text-sky-950 hover:bg-sky-100'
+                      onClick={() => setSimpleCodeOpen(true)}
                     >
-                      <Link
-                        className='underline underline-offset-4'
-                        to='/wallet'
-                      >
-                        {t('Wallet')}
-                      </Link>
-                      <Link className='underline underline-offset-4' to='/keys'>
-                        {t('API Keys')}
-                      </Link>
-                      <Link
-                        className='underline underline-offset-4'
-                        to='/playground'
-                      >
-                        {t('Text Generation')}
-                      </Link>
-                      <Link
-                        className='underline underline-offset-4'
-                        to='/security'
-                      >
-                        {t('Security & Access')}
-                      </Link>
-                      <Link
-                        className='underline underline-offset-4'
-                        to='/agent-platform/claim'
-                      >
-                        {t('Claim a delivery')}
-                      </Link>
-                    </nav>
-                  </CardContent>
-                </Card>
-                <Alert className='lg:col-span-2'>
-                  <AlertDescription>
+                      <Ticket className='size-4' />
+                      {t('Issue directly')}
+                    </Button>
+                    <Button
+                      className='border-white/25 bg-transparent text-white hover:bg-white/10'
+                      variant='outline'
+                      onClick={() => setSimpleRechargeOpen(true)}
+                    >
+                      <CircleDollarSign className='size-4' />
+                      {t('Recharge agent balance')}
+                    </Button>
+                    <Button
+                      className='border-white/25 bg-transparent text-white hover:bg-white/10'
+                      variant='outline'
+                      onClick={() => setSimplePaymentOpen(true)}
+                    >
+                      <HandCoins className='size-4' />
+                      {t('Generate customer payment code')}
+                    </Button>
+                  </div>
+                  <p className='text-xs text-sky-100/70'>
                     {t(
-                      'Customer claims are protected independently of agent status. Existing free budgets and historical rewards are not automatically converted into refundable or withdrawable cash.'
+                      'Direct codes use agent balance or credit. Customer payment codes do not use agent balance; their profit is frozen for five days.'
                     )}
-                  </AlertDescription>
-                </Alert>
+                  </p>
+                </CardContent>
+              </Card>
+
+              <div className='min-w-0'>
+                {RewardsPanel ? <RewardsPanel /> : null}
               </div>
-            </TabsContent>
-            <TabsContent value='governance'>
-              <GovernancePanel />
-            </TabsContent>
-            <TabsContent value='campaigns'>
-              <CampaignPanel />
-            </TabsContent>
-            <TabsContent value='contributions'>
-              <ContributionsPanel />
-            </TabsContent>
-            {account.capabilities.history && (
-              <>
-                <TabsContent value='credit'>
-                  <CreditPanel
-                    salesEnabled={account.capabilities.sales}
-                    settlementEnabled={account.capabilities.settlement}
-                  />
-                </TabsContent>
-                <TabsContent value='deposits'>
-                  <DepositPanel
-                    settlementEnabled={account.capabilities.settlement}
-                  />
-                </TabsContent>
-                <TabsContent value='purchases'>
-                  <Purchases
-                    salesEnabled={account.capabilities.sales}
-                    purchaseEnabled={current.purchase_enabled}
-                  />
-                </TabsContent>
-                <TabsContent value='batches'>
-                  <FundBatches
-                    settlementEnabled={account.capabilities.settlement}
-                    salesEnabled={account.capabilities.sales}
-                    refundEnabled={current.purchase_refund_enabled}
-                    creditSelfUseEnabled={
-                      current.credit_enabled && current.credit_self_use_enabled
+            </div>
+
+            <div className='grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]'>
+              <Card>
+                <CardHeader className='flex flex-row items-center justify-between gap-3'>
+                  <div>
+                    <CardTitle>{t('Recent redemption codes')}</CardTitle>
+                    <CardDescription>
+                      {t('Only the latest codes are shown here.')}
+                    </CardDescription>
+                  </div>
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    render={
+                      <Link
+                        to='/redemption-codes'
+                        search={{ view: 'records' }}
+                      />
                     }
-                    selfUseEnabled={current.procurement_self_use_enabled}
-                  />
-                </TabsContent>
-                <TabsContent value='ledger'>
-                  <FundLedgerTable />
-                </TabsContent>
-                <TabsContent value='deliveries'>
-                  <Deliveries
-                    salesEnabled={account.capabilities.sales}
-                    deliveryEnabled={current.delivery_enabled}
-                  />
-                </TabsContent>
-                <TabsContent value='refunds'>
-                  <PurchaseRefunds />
-                </TabsContent>
-              </>
-            )}
-            <TabsContent value='commissions'>
-              <Commissions />
-            </TabsContent>
-            <TabsContent value='withdrawals'>
-              <Withdrawals />
-            </TabsContent>
-            <TabsContent value='policy'>
-              <PolicyPanel />
-            </TabsContent>
-          </Tabs>
-        </div>
-      </SectionPageLayout.Content>
-    </SectionPageLayout>
+                  >
+                    {t('View all')}
+                    <ArrowUpRight className='size-4' />
+                  </Button>
+                </CardHeader>
+                <CardContent>{recentContent}</CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>{t('Agent status')}</CardTitle>
+                  <CardDescription>
+                    {t('Your ordinary account and wallet remain available.')}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className='space-y-3 text-sm'>
+                  <div className='flex items-center justify-between'>
+                    <span className='text-muted-foreground'>{t('Status')}</span>
+                    <span className='font-medium'>
+                      {self.data.profile?.status === 'active'
+                        ? t('Active')
+                        : t('Paused')}
+                    </span>
+                  </div>
+                  <Link
+                    className='text-primary inline-flex items-center gap-1 underline underline-offset-4'
+                    to='/support'
+                  >
+                    {t('Contact customer support')}
+                    <ArrowUpRight className='size-3.5' />
+                  </Link>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </SectionPageLayout.Content>
+      </SectionPageLayout>
+
+      {simpleCodeOpen && (
+        <SimpleCodeForm
+          balance={account}
+          onClose={() => setSimpleCodeOpen(false)}
+        />
+      )}
+      {simpleRechargeOpen && (
+        <SimpleRechargeForm onClose={() => setSimpleRechargeOpen(false)} />
+      )}
+      {simplePaymentOpen && (
+        <SimplePaymentForm onClose={() => setSimplePaymentOpen(false)} />
+      )}
+    </>
+  )
+}
+
+function Metric(props: {
+  label: string
+  value: ReactNode
+  emphasis?: boolean
+}) {
+  return (
+    <div>
+      <dt className='text-xs text-sky-100/65'>{props.label}</dt>
+      <dd
+        className={
+          props.emphasis
+            ? 'mt-1 text-2xl font-semibold tabular-nums'
+            : 'mt-1 text-lg font-medium tabular-nums'
+        }
+      >
+        {props.value}
+      </dd>
+    </div>
+  )
+}
+
+function RecentRedemption(props: { row: Redemption }) {
+  const { t } = useTranslation()
+  const status = isRedemptionExpired(props.row.expired_time, props.row.status)
+    ? t('Expired')
+    : t(REDEMPTION_STATUSES[props.row.status]?.labelKey ?? 'Unknown')
+  return (
+    <div className='grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b px-3 py-2.5 text-sm last:border-b-0'>
+      <div>
+        <p className='truncate font-medium'>{props.row.name}</p>
+        <p className='text-muted-foreground text-xs'>
+          {formatTimestampToDate(props.row.created_time)}
+        </p>
+      </div>
+      <div className='text-right'>
+        <p className='font-medium tabular-nums'>
+          {formatQuota(props.row.quota)}
+        </p>
+        <p className='text-muted-foreground text-xs'>{status}</p>
+      </div>
+    </div>
   )
 }

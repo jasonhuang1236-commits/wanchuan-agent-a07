@@ -19,8 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { z } from 'zod'
 
-import { AgentFinance } from '@/features/agent-platform/finance'
 import { financeSections } from '@/features/agent-platform/sections'
+import { SimpleAgentFinance } from '@/features/agent-platform/simple-finance'
 import { hasAgentAdministration } from '@/lib/agent-permissions'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -31,19 +31,10 @@ export const Route = createFileRoute('/_authenticated/agent-platform/finance')({
     }
   },
   validateSearch: z.object({
-    section: z.enum(financeSections).catch('purchases'),
+    section: z.enum(financeSections).catch('agents'),
   }),
   component: Page,
 })
 function Page() {
-  const search = Route.useSearch()
-  const navigate = Route.useNavigate()
-  return (
-    <AgentFinance
-      section={search.section}
-      onSectionChange={(section) => {
-        void navigate({ search: { section } })
-      }}
-    />
-  )
+  return <SimpleAgentFinance />
 }

@@ -12,25 +12,29 @@ import (
 )
 
 type Redemption struct {
-	CustomerUserID      int            `json:"customer_user_id" gorm:"not null;default:0;index"`
-	DeliveryID          int            `json:"delivery_id" gorm:"not null;default:0;index"`
-	SourceProtected     bool           `json:"source_protected" gorm:"not null;default:false"`
-	BudgetAgentID       int            `json:"budget_agent_id" gorm:"not null;default:0;index"`
-	BudgetReserved      bool           `json:"budget_reserved" gorm:"not null;default:false"`
-	BudgetVersion       int            `json:"version" gorm:"not null;default:0"`
-	CreationOperationID int            `json:"-" gorm:"not null;default:0;index"`
-	Id                  int            `json:"id"`
-	UserId              int            `json:"user_id"`
-	Key                 string         `json:"key" gorm:"type:char(32);uniqueIndex"`
-	Status              int            `json:"status" gorm:"default:1"`
-	Name                string         `json:"name" gorm:"index"`
-	Quota               int            `json:"quota" gorm:"default:100"`
-	CreatedTime         int64          `json:"created_time" gorm:"bigint"`
-	RedeemedTime        int64          `json:"redeemed_time" gorm:"bigint"`
-	Count               int            `json:"count" gorm:"-:all"` // only for api request
-	UsedUserId          int            `json:"used_user_id"`
-	DeletedAt           gorm.DeletedAt `gorm:"index"`
-	ExpiredTime         int64          `json:"expired_time" gorm:"bigint"` // 过期时间，0 表示不过期
+	AgentSimpleMode      string         `json:"agent_simple_mode,omitempty" gorm:"type:varchar(16);index"`
+	AgentSimpleCredit    bool           `json:"agent_simple_credit,omitempty" gorm:"not null;default:false"`
+	AgentSimpleCostQuota int64          `json:"agent_simple_cost_quota,omitempty" gorm:"type:bigint;not null;default:0"`
+	AgentSimplePaymentID int64          `json:"agent_simple_payment_id,omitempty" gorm:"type:bigint;not null;default:0;index"`
+	CustomerUserID       int            `json:"customer_user_id" gorm:"not null;default:0;index"`
+	DeliveryID           int            `json:"delivery_id" gorm:"not null;default:0;index"`
+	SourceProtected      bool           `json:"source_protected" gorm:"not null;default:false"`
+	BudgetAgentID        int            `json:"budget_agent_id" gorm:"not null;default:0;index"`
+	BudgetReserved       bool           `json:"budget_reserved" gorm:"not null;default:false"`
+	BudgetVersion        int            `json:"version" gorm:"not null;default:0"`
+	CreationOperationID  int            `json:"-" gorm:"not null;default:0;index"`
+	Id                   int            `json:"id"`
+	UserId               int            `json:"user_id"`
+	Key                  string         `json:"key" gorm:"type:char(32);uniqueIndex"`
+	Status               int            `json:"status" gorm:"default:1"`
+	Name                 string         `json:"name" gorm:"index"`
+	Quota                int            `json:"quota" gorm:"default:100"`
+	CreatedTime          int64          `json:"created_time" gorm:"bigint"`
+	RedeemedTime         int64          `json:"redeemed_time" gorm:"bigint"`
+	Count                int            `json:"count" gorm:"-:all"` // only for api request
+	UsedUserId           int            `json:"used_user_id"`
+	DeletedAt            gorm.DeletedAt `gorm:"index"`
+	ExpiredTime          int64          `json:"expired_time" gorm:"bigint"` // 过期时间，0 表示不过期
 }
 
 func GetAllRedemptions(startIdx int, num int) (redemptions []*Redemption, total int64, err error) {
@@ -181,7 +185,11 @@ func Redeem(key string, userId int) (quota int, err error) {
 		if redemption.CustomerUserID == 0 && redemption.ExpiredTime != 0 && redemption.ExpiredTime < common.GetTimestamp() {
 			expired = true
 			if !redemption.SourceProtected {
-				if err := updateRedemptionBudgetTx(tx, redemption, 0, 0, false, "expire"); err != nil {
+				if redemption.AgentSimpleMode != "" {
+					if err := ExpireAgentSimpleCodeTx(tx, redemption, 0); err != nil {
+						return err
+					}
+				} else if err := updateRedemptionBudgetTx(tx, redemption, 0, 0, false, "expire"); err != nil {
 					return err
 				}
 				return tx.Model(redemption).Select("budget_reserved", "budget_version").Updates(redemption).Error
@@ -189,10 +197,14 @@ func Redeem(key string, userId int) (quota int, err error) {
 			return nil
 		}
 		if redemption.BudgetAgentID != 0 {
-			if !redemption.BudgetReserved {
+			if !redemption.BudgetReserved && redemption.AgentSimpleMode != AgentSimpleCodePayment {
 				return ErrAgentQuotaInvariant
 			}
-			if err := updateRedemptionBudgetTx(tx, redemption, userId, 0, true, "redeem"); err != nil {
+			if redemption.BudgetReserved && redemption.AgentSimpleMode != "" {
+				if err := RedeemAgentSimpleCodeTx(tx, redemption, userId); err != nil {
+					return err
+				}
+			} else if err := updateRedemptionBudgetTx(tx, redemption, userId, 0, true, "redeem"); err != nil {
 				return err
 			}
 		}
@@ -217,7 +229,16 @@ func Redeem(key string, userId int) (quota int, err error) {
 
 		// 兑换码入账并写账本（同一事务；幂等键 = redemption id，兑换码一次性，
 		// 数据库状态 CAS 已保证不会被重复兑换）
-		ledgerResult, err := creditAgentRedemptionWalletTx(tx, redemption, userId)
+		var ledgerResult *LedgerResult
+		if redemption.AgentSimpleMode != "" {
+			ledgerResult, err = CreditQuotaTx(tx, LedgerEntry{
+				UserId: userId, Account: AccountPaid, Delta: redemption.Quota,
+				Reason: LedgerReasonRedemption, ReferenceType: "redemption",
+				ReferenceId: strconv.Itoa(redemption.Id),
+			})
+		} else {
+			ledgerResult, err = creditAgentRedemptionWalletTx(tx, redemption, userId)
+		}
 		if err != nil {
 			return err
 		}

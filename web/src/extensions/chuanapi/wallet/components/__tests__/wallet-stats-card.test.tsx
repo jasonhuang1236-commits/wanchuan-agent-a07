@@ -33,6 +33,9 @@ const user: UserWalletData = {
 }
 
 const summary: WalletSummary = {
+  referral_available_quota: 1_000_000,
+  referral_total_quota: 3_000_000,
+  referral_invite_count: 2,
   total: 2_000_000,
   paid: 1_000_000,
   bonus: 500_000,

@@ -58,6 +58,9 @@ const record: ReferralCommissionItem = {
   source_name: 'a***',
   paid_quota: 1000000,
   reward_quota: 50000,
+  reversed_quota: 0,
+  status: 'released',
+  matures_at: 0,
   rate: 0.05,
   created_at: 1735689600,
 }
@@ -70,6 +73,7 @@ function renderCard(overrides: Record<string, unknown> = {}) {
     <I18nextProvider i18n={testI18n}>
       <AffiliateRewardsCard
         user={user}
+        availableQuota={user.aff_quota ?? 0}
         affiliateLink={affiliateLink}
         onTransfer={onTransfer}
         complianceConfirmed

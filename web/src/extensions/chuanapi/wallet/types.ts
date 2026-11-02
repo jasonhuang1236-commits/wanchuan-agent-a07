@@ -293,6 +293,9 @@ export interface WalletSummary {
   paid: number
   bonus: number
   reward: number
+  referral_available_quota: number
+  referral_total_quota: number
+  referral_invite_count: number
   rules: WalletRules
 }
 
@@ -338,11 +341,15 @@ export interface ReferralCommissionItem {
   source_name: string
   paid_quota: number
   reward_quota: number
+  reversed_quota: number
   rate: number
+  status: 'frozen' | 'released' | 'partially_reversed' | 'cancelled' | string
+  matures_at: number
   created_at: number
 }
 
 export interface ReferralCommissionPage {
   items: ReferralCommissionItem[]
   total: number
+  available_quota: number
 }

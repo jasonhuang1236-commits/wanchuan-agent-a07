@@ -16,39 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-export const portalSections = [
-  'overview',
-  'governance',
-  'campaigns',
-  'contributions',
-  'credit',
-  'deposits',
-  'purchases',
-  'batches',
-  'ledger',
-  'deliveries',
-  'refunds',
-  'commissions',
-  'withdrawals',
-  'policy',
-] as const
+export const portalSections = ['overview'] as const
 export type PortalSection = (typeof portalSections)[number]
 
-export const financeSections = [
-  'governance',
-  'contributions',
-  'credit',
-  'deposits',
-  'campaigns',
-  'agreements',
-  'statements',
-  'purchases',
-  'refunds',
-  'withdrawals',
-  'profiles',
-  'sources',
-  'fund-reconciliation',
-  'reconciliation',
-  'policy',
-] as const
+export const financeSections = ['agents', 'records', 'withdrawals'] as const
 export type FinanceSection = (typeof financeSections)[number]

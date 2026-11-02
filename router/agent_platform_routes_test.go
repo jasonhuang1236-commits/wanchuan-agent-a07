@@ -23,19 +23,14 @@ func TestAgentPlatformModuleMountsCompleteBrowserSurface(t *testing.T) {
 		routes[route.Method+" "+route.Path] = route.Handler
 	}
 	expected := []string{
-		"GET /self", "GET /policy/current", "POST /operations/prepare", "GET /operations/:request_id",
-		"GET /purchases", "POST /purchases/quotes", "POST /purchases", "POST /purchases/:id/evidence",
-		"GET /fund-batches", "GET /fund-ledger", "GET /purchase-audit", "POST /procurement/self-use",
-		"GET /purchase-refunds", "POST /purchase-refunds", "GET /deliveries", "POST /deliveries", "GET /deliveries/received", "POST /deliveries/claim", "POST /deliveries/cancel-code", "POST /deliveries/:id/confirm", "POST /deliveries/:id/cancel",
-		"GET /commissions/summary", "GET /commissions/awards", "GET /commissions/ledger", "GET /commissions/debts", "GET /commissions/conversions", "POST /commissions/conversions/quote", "POST /commissions/conversions",
-		"GET /commission-recipients", "POST /commission-recipients", "PUT /commission-recipients/:id",
-		"GET /withdrawals", "POST /withdrawals/quote", "POST /withdrawals", "GET /withdrawals/:id",
-		"GET /profiles", "GET /profiles/:id", "PATCH /profiles/:id",
-		"GET /finance/policies", "POST /finance/policies", "GET /finance/purchases", "POST /finance/purchases/:id/verify", "POST /finance/purchases/:id/review",
-		"GET /finance/fund-ledger", "GET /finance/purchase-audit", "GET /finance/fund-reclassifications", "POST /finance/fund-reclassifications", "POST /finance/fund-reclassifications/:id/confirm",
-		"GET /finance/purchase-refunds", "POST /finance/purchase-refunds/:id/approve", "POST /finance/purchase-refunds/:id/submit", "POST /finance/purchase-refunds/:id/resolve", "GET /finance/funds/reconciliation",
-		"GET /finance/withdrawals", "GET /finance/withdrawals/:id/instructions", "POST /finance/withdrawals/:id/approve", "POST /finance/withdrawals/:id/reject", "POST /finance/withdrawals/:id/start", "POST /finance/withdrawals/:id/resolve",
-		"GET /finance/commissions/outbox", "GET /finance/commissions/refunds", "POST /finance/commissions/refunds", "POST /finance/commissions/reserve-release", "POST /finance/commissions/outbox/retry", "GET /finance/commissions/reconciliation",
+		"GET /self", "GET /simple/balance", "GET /simple/codes", "POST /simple/codes", "POST /simple/codes/:id/cancel",
+		"POST /simple/recharge", "POST /simple/payment/quote", "GET /simple/payment-methods", "POST /simple/payment", "GET /simple/payment-orders",
+		"GET /simple/payment-fees", "POST /simple/payment-fees", "POST /simple/payment/refunds", "POST /simple/payment/withdrawals", "POST /simple/payment/transfer",
+		"POST /simple/finance/status", "POST /simple/finance/adjust", "POST /simple/finance/credit-limit", "POST /simple/finance/repayment",
+		"GET /simple/finance/agents", "GET /simple/finance/history/:kind", "POST /simple/finance/codes/:id/reveal", "POST /simple/finance/withdrawal", "POST /simple/finance/referral-transfer", "POST /simple/finance/exit",
+	}
+	for _, path := range []string{"POST /api/agent-platform/purchases", "POST /api/agent-platform/withdrawals", "POST /api/agent-platform/campaigns/claim", "POST /api/agent-platform/operations/prepare", "PATCH /api/agent-platform/profiles/:id"} {
+		assert.NotContains(t, routes, path, "A07 does not expose the retired workflow")
 	}
 	for _, entry := range expected {
 		parts := strings.SplitN(entry, " ", 2)

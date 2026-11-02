@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -60,11 +61,15 @@ func RecordAgentCommissionRefundTx(tx *gorm.DB, input AgentCommissionRefundFact)
 	if created.RowsAffected == 0 {
 		return RecordAgentCommissionRefundTx(tx, input)
 	}
+	var paymentEvent AgentCommissionOutbox
+	if err := tx.Where("kind = ? AND reference_id = ?", "payment", input.TopUpReferenceID).First(&paymentEvent).Error; err != nil {
+		return nil, err
+	}
 	payload, err := common.Marshal(input)
 	if err != nil {
 		return nil, err
 	}
-	event := AgentCommissionOutbox{EventKey: key, Kind: "refund", ReferenceID: input.TopUpReferenceID, Route: "cash", Payload: string(payload), Status: "pending", NextAttemptAt: common.GetTimestamp()}
+	event := AgentCommissionOutbox{EventKey: key, Kind: "refund", ReferenceID: input.TopUpReferenceID, Route: paymentEvent.Route, Payload: string(payload), Status: "pending", NextAttemptAt: common.GetTimestamp()}
 	if err := tx.Create(&event).Error; err != nil {
 		return nil, err
 	}
@@ -87,9 +92,6 @@ func reverseAgentCommissionEventTx(tx *gorm.DB, event *AgentCommissionOutbox) (s
 	if paymentEvent.Status != "done" {
 		return "", errors.New("commission payment event must be processed before refund")
 	}
-	if paymentEvent.Route != "cash" {
-		return "legacy_not_cashable", nil
-	}
 	var snapshot agentCommissionPaymentSnapshot
 	if err := common.UnmarshalJsonStr(paymentEvent.Payload, &snapshot); err != nil {
 		return "", err
@@ -97,6 +99,12 @@ func reverseAgentCommissionEventTx(tx *gorm.DB, event *AgentCommissionOutbox) (s
 	payment := snapshot.Payment
 	if payment.Provider != fact.Provider || payment.Environment != fact.Environment || payment.MerchantScope != fact.MerchantScope || payment.ExternalReference != fact.PaymentReference || payment.Currency != fact.Currency || payment.CurrencyExponent != fact.CurrencyExponent || fact.CumulativeRefundedMinor > payment.PaidMinor {
 		return "", ErrAgentCommissionConflict
+	}
+	if paymentEvent.Route == "referral" {
+		return reverseReferralCommissionTx(tx, event, fact, payment.PaidMinor)
+	}
+	if paymentEvent.Route != "cash" {
+		return "retired_referral_event", nil
 	}
 	var award AgentCommissionAward
 	err := tx.Where("event_id = ?", paymentEvent.ID).First(&award).Error
@@ -162,6 +170,61 @@ func reverseAgentCommissionEventTx(tx *gorm.DB, event *AgentCommissionOutbox) (s
 		return "", err
 	}
 	return "cash_reversed", nil
+}
+
+func reverseReferralCommissionTx(tx *gorm.DB, event *AgentCommissionOutbox, fact AgentCommissionRefundFact, paidMinor int64) (string, error) {
+	var reward ReferralCommission
+	if err := tx.Where("reference_type = ? AND reference_id = ?", ReferralReferenceTopUp, fact.TopUpReferenceID).First(&reward).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "no_original_referral", nil
+		}
+		return "", err
+	}
+	var inviter User
+	if err := lockForUpdate(tx).Select("id", "aff_quota").First(&inviter, reward.UserId).Error; err != nil {
+		return "", err
+	}
+	if err := lockForUpdate(tx).First(&reward, reward.Id).Error; err != nil {
+		return "", err
+	}
+	if paidMinor <= 0 || fact.CumulativeRefundedMinor <= reward.RefundedMinor || fact.CumulativeRefundedMinor > paidMinor {
+		return "refund_duplicate_or_stale", nil
+	}
+	target, err := common.WalletQuotaFromDecimalStrict(
+		decimal.NewFromInt(int64(reward.RewardQuota)).
+			Mul(decimal.NewFromInt(fact.CumulativeRefundedMinor)).
+			Div(decimal.NewFromInt(paidMinor)).Truncate(0),
+	)
+	if err != nil || target < reward.ReversedQuota || target > reward.RewardQuota {
+		return "", ErrAgentCommissionInvariant
+	}
+	reverse := target - reward.ReversedQuota
+	if reverse > 0 {
+		if inviter.AffQuota < -common.MaxWalletQuota+reverse {
+			return "", ErrAgentCommissionInvariant
+		}
+		result := tx.Model(&User{}).Where("id = ? AND aff_quota >= ?", inviter.Id, -common.MaxWalletQuota+reverse).
+			UpdateColumn("aff_quota", gorm.Expr("aff_quota - ?", reverse))
+		if result.Error != nil {
+			return "", result.Error
+		}
+		if result.RowsAffected != 1 {
+			return "", ErrAgentCommissionInvariant
+		}
+	}
+	reward.RefundedMinor = fact.CumulativeRefundedMinor
+	reward.ReversedQuota = target
+	if target == reward.RewardQuota {
+		reward.Status = ReferralCommissionStatusCancelled
+	}
+	if err := tx.Model(&reward).Where("id = ? AND reversed_quota <= ?", reward.Id, target).
+		Updates(map[string]any{"refunded_minor": reward.RefundedMinor, "reversed_quota": reward.ReversedQuota, "status": reward.Status}).Error; err != nil {
+		return "", err
+	}
+	if target == reward.RewardQuota {
+		return "referral_cancelled", nil
+	}
+	return "referral_reversed", nil
 }
 
 // AgentVerifiedProviderRefund is accepted only after provider signature

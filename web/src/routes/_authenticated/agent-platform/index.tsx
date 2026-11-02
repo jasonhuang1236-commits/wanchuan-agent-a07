@@ -16,27 +16,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute } from '@tanstack/react-router'
-import { z } from 'zod'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 
 import { AgentPortal } from '@/features/agent-platform'
-import { portalSections } from '@/features/agent-platform/sections'
+import { hasAgentHistory } from '@/lib/agent-permissions'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 export const Route = createFileRoute('/_authenticated/agent-platform/')({
-  validateSearch: z.object({
-    section: z.enum(portalSections).catch('overview'),
-  }),
-  component: Page,
+  beforeLoad: () => {
+    const user = useAuthStore.getState().auth.user
+    if (!user || (!hasAgentHistory(user) && user.role < ROLE.ADMIN)) {
+      throw redirect({ to: '/403' })
+    }
+  },
+  component: AgentPortal,
 })
-function Page() {
-  const search = Route.useSearch()
-  const navigate = Route.useNavigate()
-  return (
-    <AgentPortal
-      section={search.section}
-      onSectionChange={(section) => {
-        void navigate({ search: { section } })
-      }}
-    />
-  )
-}

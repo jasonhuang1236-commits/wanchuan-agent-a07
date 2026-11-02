@@ -26,7 +26,7 @@ import { useSidebarData } from '../use-sidebar-data'
 
 afterEach(() => useAuthStore.getState().auth.reset())
 
-it('retains wallet, API keys, models and security navigation for legacy agents', () => {
+it('shows the simplified agent entries without legacy agent workspaces', () => {
   useAuthStore
     .getState()
     .auth.setUser({ id: 7, username: 'agent', role: ROLE.AGENT })
@@ -42,10 +42,15 @@ it('retains wallet, API keys, models and security navigation for legacy agents',
       '/playground',
       '/profile',
       '/security',
-      '/redemption-codes',
-      '/agent-redemption',
+      '/agent-platform',
+      '/redemption-codes?view=center',
+      '/redemption-codes?view=records',
     ])
   )
+  const urls = result.current.navGroups.flatMap((group) =>
+    group.items.map((item) => ('url' in item ? item.url : undefined))
+  )
+  expect(urls).not.toContain('/agent-redemption')
 })
 
 it('preserves administrator workspace navigation including agent management', () => {
@@ -57,7 +62,7 @@ it('preserves administrator workspace navigation including agent management', ()
     result.current.navGroups.find((group) => group.id === 'admin')?.items
   ).toEqual(
     expect.arrayContaining([
-      expect.objectContaining({ url: '/agent-redemption' }),
+      expect.objectContaining({ url: '/agent-platform/finance' }),
       expect.objectContaining({ url: '/users' }),
     ])
   )

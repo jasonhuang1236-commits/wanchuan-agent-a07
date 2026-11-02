@@ -27,9 +27,7 @@ export function hasAgentHistory(user: AuthUser | null | undefined): boolean {
 export function hasAgentAdministration(
   user: AuthUser | null | undefined
 ): boolean {
-  return Boolean(
-    user && user.role >= ROLE.ADMIN && user.permissions?.agent_admin
-  )
+  return Boolean(user && user.role === ROLE.SUPER_ADMIN)
 }
 
 /** Legacy budget pages remain self-scoped after the role-to-profile migration. */
