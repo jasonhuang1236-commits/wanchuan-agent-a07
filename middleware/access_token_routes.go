@@ -72,12 +72,6 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"POST /api/agent-platform/simple/recharge":                  accessTokenSessionRule,
 
 	// Agent budgets and invitation policy are browser-only control-plane operations.
-	"GET /api/agent-redemption/accounts":            accessTokenSessionRule,
-	"GET /api/agent-redemption/accounts/:id/ledger": accessTokenSessionRule,
-	"POST /api/agent-redemption/allocations":        accessTokenSessionRule,
-	"GET /api/agent-redemption/invitations":         accessTokenSessionRule,
-	"GET /api/agent-redemption/invitation-policy":   accessTokenSessionRule,
-	"PUT /api/agent-redemption/invitation-policy":   accessTokenSessionRule,
 
 	// router/api-router.go: top level
 	"GET /api/models":                     accessTokenScopeRule("profile:read"),

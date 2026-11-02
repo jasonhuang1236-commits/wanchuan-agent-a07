@@ -21,6 +21,7 @@ func TestAgentPlatformModuleMountsCompleteBrowserSurface(t *testing.T) {
 	routes := map[string]string{}
 	for _, route := range engine.Routes() {
 		routes[route.Method+" "+route.Path] = route.Handler
+		assert.False(t, strings.HasPrefix(route.Path, "/api/agent-redemption"), "the retired budget API must not remain reachable: %s", route.Path)
 	}
 	expected := []string{
 		"GET /self", "GET /simple/balance", "GET /simple/codes", "POST /simple/codes", "POST /simple/codes/:id/cancel",
@@ -36,6 +37,18 @@ func TestAgentPlatformModuleMountsCompleteBrowserSurface(t *testing.T) {
 		parts := strings.SplitN(entry, " ", 2)
 		path := parts[0] + " /api/agent-platform" + parts[1]
 		assert.Contains(t, routes, path)
+	}
+	for _, request := range []struct{ method, path string }{
+		{http.MethodGet, "/api/agent-redemption/accounts"},
+		{http.MethodGet, "/api/agent-redemption/accounts/1/ledger"},
+		{http.MethodPost, "/api/agent-redemption/allocations"},
+		{http.MethodGet, "/api/agent-redemption/invitations"},
+		{http.MethodGet, "/api/agent-redemption/invitation-policy"},
+		{http.MethodPut, "/api/agent-redemption/invitation-policy"},
+	} {
+		response := httptest.NewRecorder()
+		engine.ServeHTTP(response, httptest.NewRequest(request.method, request.path, strings.NewReader(`{}`)))
+		assert.Equal(t, http.StatusNotFound, response.Code, request.method+" "+request.path)
 	}
 }
 

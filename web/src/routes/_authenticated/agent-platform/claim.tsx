@@ -16,10 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute } from '@tanstack/react-router'
-
-import { DeliveryClaim } from '@/features/agent-platform/claim'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 
 export const Route = createFileRoute('/_authenticated/agent-platform/claim')({
-  component: DeliveryClaim,
+  beforeLoad: () => {
+    throw redirect({ to: '/agent-platform', replace: true })
+  },
 })
