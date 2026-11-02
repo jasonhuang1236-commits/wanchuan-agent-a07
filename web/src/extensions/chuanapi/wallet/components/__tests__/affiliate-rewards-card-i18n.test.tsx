@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { createInstance } from 'i18next'
 import { I18nextProvider } from 'react-i18next'
 import { beforeAll, describe, expect, test, vi } from 'vitest'
@@ -68,7 +68,7 @@ beforeAll(async () => {
 })
 
 function renderChineseCard(overrides: Record<string, unknown> = {}) {
-  return render(
+  const result = render(
     <I18nextProvider i18n={testI18n}>
       <AffiliateRewardsCard
         user={user}
@@ -85,6 +85,9 @@ function renderChineseCard(overrides: Record<string, unknown> = {}) {
       />
     </I18nextProvider>
   )
+  fireEvent.click(screen.getByRole('button', { name: '奖励说明' }))
+  fireEvent.click(screen.getByRole('button', { name: '返佣记录' }))
+  return result
 }
 
 describe('affiliate rewards card Chinese copy', () => {

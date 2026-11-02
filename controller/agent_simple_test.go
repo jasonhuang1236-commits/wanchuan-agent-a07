@@ -17,6 +17,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAgentSimpleTransfersShareWalletComplianceGate(t *testing.T) {
+	previous := *operation_setting.GetPaymentSetting()
+	previousDB := model.DB
+	t.Cleanup(func() { *operation_setting.GetPaymentSetting() = previous; model.DB = previousDB })
+	operation_setting.GetPaymentSetting().ComplianceConfirmed = false
+	model.DB = nil
+	for _, handler := range []gin.HandlerFunc{TransferReferralToAgentBalance, TransferAgentSimplePaymentProfit} {
+		response := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(response)
+		ctx.Request = httptest.NewRequest(http.MethodPost, "/synthetic", strings.NewReader(`{"quota":500000,"request_id":"synthetic-transfer"}`))
+		handler(ctx)
+		assert.Equal(t, http.StatusForbidden, response.Code)
+		assert.Contains(t, response.Body.String(), "Payment compliance terms are not confirmed")
+	}
+}
+
 func TestAgentSimpleHTTPRechargeReplayAndSignedPaymentDelivery(t *testing.T) {
 	db, _ := newAuditTestDatabase(t, "sqlite", "")
 	oldDB, oldLog := model.DB, model.LOG_DB

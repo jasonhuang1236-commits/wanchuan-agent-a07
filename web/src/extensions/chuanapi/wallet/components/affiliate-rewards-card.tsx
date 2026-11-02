@@ -16,12 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Share2 } from 'lucide-react'
+import { Share2, ChevronDown } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { CopyButton } from '@/components/copy-button'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from '@/components/ui/collapsible'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { TitledCard } from '@/components/ui/titled-card'
@@ -35,6 +40,7 @@ interface AffiliateRewardsCardProps {
   user: UserWalletData | null
   affiliateLink: string
   onTransfer: () => void
+  onWithdraw?: () => void
   availableQuota: number
   complianceConfirmed?: boolean
   referralRate: number
@@ -90,16 +96,23 @@ export function AffiliateRewardsCard(props: AffiliateRewardsCardProps) {
       descriptionClassName='sm:text-xs'
       contentClassName='space-y-3 sm:p-3'
       action={
-        hasRewards ? (
-          <Button
-            onClick={props.onTransfer}
-            disabled={!props.complianceConfirmed}
-            size='sm'
-            variant='outline'
-          >
-            {t('Referral Transfer to Balance')}
-          </Button>
-        ) : null
+        <div className='flex flex-wrap gap-2'>
+          {hasRewards ? (
+            <Button
+              onClick={props.onTransfer}
+              disabled={!props.complianceConfirmed}
+              size='sm'
+              variant='outline'
+            >
+              {t('Referral Transfer to Balance')}
+            </Button>
+          ) : null}
+          {props.onWithdraw && (
+            <Button size='sm' variant='outline' onClick={props.onWithdraw}>
+              {t('Contact support to withdraw')}
+            </Button>
+          )}
+        </div>
       }
     >
       <div className='bg-muted/40 grid grid-cols-3 gap-3 rounded-lg border p-2 text-center'>
@@ -142,37 +155,52 @@ export function AffiliateRewardsCard(props: AffiliateRewardsCardProps) {
         </p>
       ) : null}
 
-      <div className='space-y-2 rounded-lg border p-2'>
-        <h4 className='text-sm font-semibold'>{t('Reward Rules')}</h4>
-        <ol className='text-muted-foreground list-decimal space-y-1 ps-4 text-xs'>
-          <li>
-            {t('Only website online top-ups qualify for invitation rewards.')}
-          </li>
-          <li>
-            {t('Earn {{rate}} from every qualifying top-up, with no cap.', {
-              rate: formatReferralRate(props.referralRate),
-            })}
-          </li>
-          <li>
-            {t(
-              'Rewards unlock after five days. Refunds cancel or reverse the matching reward amount.'
-            )}
-          </li>
-        </ol>
-      </div>
+      <Collapsible className='space-y-2 rounded-lg border p-2'>
+        <CollapsibleTrigger className='flex w-full items-center justify-between gap-2 text-sm font-semibold'>
+          {t('Reward Rules')}
+          <ChevronDown className='size-4' aria-hidden />
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <ol className='text-muted-foreground list-decimal space-y-1 ps-4 text-xs'>
+            <li>
+              {t('Only website online top-ups qualify for invitation rewards.')}
+            </li>
+            <li>
+              {t('Earn {{rate}} from every qualifying top-up, with no cap.', {
+                rate: formatReferralRate(props.referralRate),
+              })}
+            </li>
+            <li>
+              {t(
+                'Rewards unlock after five days. Refunds cancel or reverse the matching reward amount.'
+              )}
+            </li>
+            <li>
+              {t(
+                'Handled by support. Minimum $20 combined, once per calendar month, with a 2% fee.'
+              )}
+            </li>
+          </ol>
+        </CollapsibleContent>
+      </Collapsible>
 
-      <div className='space-y-2 border-t pt-2'>
-        <h4 className='text-sm font-semibold'>{t('Commission Records')}</h4>
-        <ReferralCommissionRecords
-          records={props.records}
-          total={props.recordsTotal}
-          loading={props.recordsLoading}
-          error={props.recordsError}
-          onRetry={props.onRecordsRetry}
-          page={props.recordsPage}
-          onPageChange={props.onRecordsPageChange}
-        />
-      </div>
+      <Collapsible className='space-y-2 border-t pt-2'>
+        <CollapsibleTrigger className='flex w-full items-center justify-between gap-2 text-sm font-semibold'>
+          {t('Commission Records')}
+          <ChevronDown className='size-4' aria-hidden />
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <ReferralCommissionRecords
+            records={props.records}
+            total={props.recordsTotal}
+            loading={props.recordsLoading}
+            error={props.recordsError}
+            onRetry={props.onRecordsRetry}
+            page={props.recordsPage}
+            onPageChange={props.onRecordsPageChange}
+          />
+        </CollapsibleContent>
+      </Collapsible>
     </TitledCard>
   )
 }

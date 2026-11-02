@@ -151,6 +151,7 @@ export function SimpleAgentFinance() {
   const [recordsAgent, setRecordsAgent] = useState<number | undefined>()
   const [openAgent, setOpenAgent] = useState(false)
   const [feesOpen, setFeesOpen] = useState(false)
+  const [userWithdrawalOpen, setUserWithdrawalOpen] = useState(false)
   const refresh = async () => {
     await client.invalidateQueries({ queryKey: ['simple-root'] })
     await client.invalidateQueries({ queryKey: ['agent-platform'] })
@@ -179,6 +180,13 @@ export function SimpleAgentFinance() {
                   onClick={() => setFeesOpen(true)}
                 >
                   {t('Payment channel fees')}
+                </Button>
+                <Button
+                  className='w-fit'
+                  variant='outline'
+                  onClick={() => setUserWithdrawalOpen(true)}
+                >
+                  {t('Record user withdrawal')}
                 </Button>
               </CardHeader>
               <CardContent className='space-y-3'>
@@ -324,6 +332,15 @@ export function SimpleAgentFinance() {
         <OpenAgentForm onClose={() => setOpenAgent(false)} onDone={refresh} />
       )}
       {feesOpen && <SimplePaymentFeeForm onClose={() => setFeesOpen(false)} />}
+      {userWithdrawalOpen && (
+        <RootActionForm
+          agent={{ agent_user_id: 0 }}
+          action='withdrawal'
+          selectUser
+          onClose={() => setUserWithdrawalOpen(false)}
+          onDone={refresh}
+        />
+      )}
       {selected &&
       action &&
       action !== 'pause' &&
@@ -394,14 +411,25 @@ function RootStatusForm(props: {
 }
 
 function RootActionForm(props: {
-  agent: SimpleAgentRow
+  agent: Pick<SimpleAgentRow, 'agent_user_id'>
   action: string
+  selectUser?: boolean
   onClose: () => void
   onDone: () => Promise<void>
 }) {
   const { t } = useTranslation()
   const requestId = useRequestId()
   const fields = [
+    ...(props.selectUser
+      ? [
+          {
+            name: 'user_id',
+            label: 'User ID',
+            kind: 'integer' as const,
+            min: 1,
+          },
+        ]
+      : []),
     ...actionFields[props.action],
     {
       name: 'confirmed',
@@ -422,6 +450,9 @@ function RootActionForm(props: {
       onClose={props.onClose}
       onSubmit={async (values) => {
         const id = requestId(values)
+        const targetUserId = props.selectUser
+          ? Number(values.user_id)
+          : props.agent.agent_user_id
         const quota = (name: string) =>
           parseAgentQuota(String(values[name] ?? '0')) ?? Number.NaN
         if (props.action === 'adjust') {
@@ -451,7 +482,7 @@ function RootActionForm(props: {
         if (props.action === 'withdrawal') {
           await recordSimpleWithdrawal({
             request_id: id,
-            user_id: props.agent.agent_user_id,
+            user_id: targetUserId,
             referral_quota: quota('referral'),
             payment_quota: quota('payment'),
             reason: String(values.reason),

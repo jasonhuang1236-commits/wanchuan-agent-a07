@@ -65,7 +65,10 @@ const record: ReferralCommissionItem = {
   created_at: 1735689600,
 }
 
-function renderCard(overrides: Record<string, unknown> = {}) {
+function renderCard(
+  overrides: Record<string, unknown> = {},
+  expandSections = true
+) {
   const onTransfer = vi.fn()
   const onRecordsPageChange = vi.fn()
   const onRecordsRetry = vi.fn()
@@ -87,10 +90,27 @@ function renderCard(overrides: Record<string, unknown> = {}) {
       />
     </I18nextProvider>
   )
+  if (expandSections && !overrides.loading) {
+    fireEvent.click(screen.getByRole('button', { name: 'Reward Rules' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Commission Records' }))
+  }
   return { ...result, onTransfer, onRecordsPageChange, onRecordsRetry }
 }
 
 describe('affiliate rewards card', () => {
+  test('keeps rules and invitation records collapsed until opened', async () => {
+    renderCard({}, false)
+    expect(
+      screen.getByRole('button', { name: 'Reward Rules' })
+    ).toHaveAttribute('aria-expanded', 'false')
+    expect(
+      screen.queryByRole('region', { name: 'Commission Records' })
+    ).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Commission Records' }))
+    expect(
+      await screen.findByRole('region', { name: 'Commission Records' })
+    ).toBeVisible()
+  })
   test('shows the invitation link, native reward stats, and configured rule', () => {
     renderCard()
 
@@ -115,6 +135,12 @@ describe('affiliate rewards card', () => {
     expect(records).toHaveClass('overflow-auto', 'max-h-24')
     expect(records).toHaveAttribute('tabindex', '0')
     screen.getByRole('button', { name: 'Copy referral link' }).focus()
+    await keyboard.tab()
+    expect(screen.getByRole('button', { name: 'Reward Rules' })).toHaveFocus()
+    await keyboard.tab()
+    expect(
+      screen.getByRole('button', { name: 'Commission Records' })
+    ).toHaveFocus()
     await keyboard.tab()
     expect(records).toHaveFocus()
     expect(records).not.toContainElement(

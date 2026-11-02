@@ -347,6 +347,10 @@ func UpdateAgentSimpleStatus(c *gin.Context) {
 }
 
 func TransferAgentSimplePaymentProfit(c *gin.Context) {
+	if !operation_setting.IsPaymentComplianceConfirmed() {
+		common.ApiErrorStatus(c, http.StatusForbidden, common.NewMessage("Payment compliance terms are not confirmed"))
+		return
+	}
 	identity, ok := agentPlatformIdentity(c)
 	if !ok {
 		writeAgentSimpleError(c, model.ErrAgentSimplePermission)
@@ -575,6 +579,10 @@ func RecordAgentSimpleWithdrawal(c *gin.Context) {
 }
 
 func TransferReferralToAgentBalance(c *gin.Context) {
+	if !operation_setting.IsPaymentComplianceConfirmed() {
+		common.ApiErrorStatus(c, http.StatusForbidden, common.NewMessage("Payment compliance terms are not confirmed"))
+		return
+	}
 	identity, ok := agentPlatformIdentity(c)
 	if !ok {
 		writeAgentSimpleError(c, model.ErrAgentSimplePermission)

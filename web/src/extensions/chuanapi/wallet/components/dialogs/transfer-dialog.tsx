@@ -24,6 +24,7 @@ import { Dialog } from '@/components/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import {
   formatQuota,
   parseQuotaFromDollars,
@@ -33,7 +34,8 @@ import {
 interface TransferDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onConfirm: (amount: number) => Promise<boolean>
+  onConfirm: (amount: number, target: 'wallet' | 'agent') => Promise<boolean>
+  allowAgentTarget?: boolean
   availableQuota: number
   transferring: boolean
 }
@@ -44,12 +46,14 @@ export function TransferDialog({
   onConfirm,
   availableQuota,
   transferring,
+  allowAgentTarget,
 }: TransferDialogProps) {
   const { t } = useTranslation()
   const minimumQuota = 1
   const minimumAmount = quotaUnitsToDollars(minimumQuota)
   const maximumAmount = quotaUnitsToDollars(availableQuota)
   const [amount, setAmount] = useState(minimumAmount)
+  const [target, setTarget] = useState<'wallet' | 'agent'>('wallet')
   const transferQuota = parseQuotaFromDollars(amount)
   const canTransfer =
     Number.isFinite(amount) &&
@@ -60,13 +64,14 @@ export function TransferDialog({
     if (open) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setAmount(minimumAmount)
+      setTarget('wallet')
     }
   }, [minimumAmount, open])
 
   const handleConfirm = async () => {
     if (!canTransfer) return
 
-    const success = await onConfirm(transferQuota)
+    const success = await onConfirm(transferQuota, target)
     if (success) {
       onOpenChange(false)
     }
@@ -77,7 +82,7 @@ export function TransferDialog({
       open={open}
       onOpenChange={onOpenChange}
       title={t('Transfer Rewards')}
-      description={t('Move affiliate rewards to your main balance')}
+      description={t('Transfer released referral rewards 1:1 without a fee.')}
       contentClassName='max-sm:w-[calc(100vw-1.5rem)] sm:max-w-md'
       titleClassName='text-xl font-semibold'
       footerClassName='grid grid-cols-2 gap-2 sm:flex'
@@ -103,6 +108,26 @@ export function TransferDialog({
       }
     >
       <div className='space-y-4 py-3 sm:space-y-6 sm:py-4'>
+        {allowAgentTarget && (
+          <div className='space-y-2'>
+            <Label htmlFor='transfer-target'>{t('Transfer target')}</Label>
+            <NativeSelect
+              id='transfer-target'
+              value={target}
+              onChange={(event) =>
+                setTarget(event.target.value as 'wallet' | 'agent')
+              }
+              disabled={transferring}
+            >
+              <NativeSelectOption value='wallet'>
+                {t('User wallet')}
+              </NativeSelectOption>
+              <NativeSelectOption value='agent'>
+                {t('Agent balance')}
+              </NativeSelectOption>
+            </NativeSelect>
+          </div>
+        )}
         <div className='space-y-2'>
           <Label className='text-muted-foreground text-xs font-medium tracking-wider uppercase'>
             {t('Available Rewards')}

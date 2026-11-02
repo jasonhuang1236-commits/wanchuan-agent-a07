@@ -50,6 +50,7 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import { getPlatform } from './api'
 import { SimpleCodeForm } from './components/simple-code-form'
+import { SimpleIncomeTransferForm } from './components/simple-income-transfer-form'
 import { SimplePaymentForm } from './components/simple-payment-form'
 import { SimpleRechargeForm } from './components/simple-recharge-form'
 import { formatAgentCash, formatAgentQuota as formatQuota } from './lib/money'
@@ -87,6 +88,7 @@ export function AgentPortal() {
   const [simpleCodeOpen, setSimpleCodeOpen] = useState(false)
   const [simpleRechargeOpen, setSimpleRechargeOpen] = useState(false)
   const [repaymentOpen, setRepaymentOpen] = useState(false)
+  const [incomeTransferOpen, setIncomeTransferOpen] = useState(false)
   const [simplePaymentOpen, setSimplePaymentOpen] = useState(false)
 
   if (self.isPending || balance.isPending) {
@@ -173,6 +175,28 @@ export function AgentPortal() {
                       value={formatQuota(account.payment_available_quota)}
                     />
                   </dl>
+                  <Button
+                    className='border-white/25 bg-transparent text-white hover:bg-white/10'
+                    size='sm'
+                    variant='outline'
+                    onClick={() => setIncomeTransferOpen(true)}
+                    disabled={
+                      account.status !== 'active' ||
+                      account.payment_available_quota <= 0 ||
+                      account.amount_due_quota > 0 ||
+                      account.payment_debt_quota > 0
+                    }
+                  >
+                    {t('Transfer payment income to agent balance')}
+                  </Button>
+                  {(account.amount_due_quota > 0 ||
+                    account.payment_debt_quota > 0) && (
+                    <p className='text-xs text-sky-100/75'>
+                      {t(
+                        'Income transfers are available after outstanding debt has been settled.'
+                      )}
+                    </p>
+                  )}
                   <div className='flex flex-wrap gap-2'>
                     <Button
                       className='bg-white text-sky-950 hover:bg-sky-100'
@@ -308,6 +332,12 @@ export function AgentPortal() {
           kind='repayment'
           amountDue={account.amount_due_quota}
           onClose={() => setRepaymentOpen(false)}
+        />
+      )}
+      {incomeTransferOpen && (
+        <SimpleIncomeTransferForm
+          availableQuota={account.payment_available_quota}
+          onClose={() => setIncomeTransferOpen(false)}
         />
       )}
       {simplePaymentOpen && (

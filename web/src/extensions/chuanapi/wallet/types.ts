@@ -21,6 +21,7 @@ For commercial licensing, please contact support@quantumnous.com
 // ============================================================================
 
 import type { CreemProduct } from '@/lib/creem'
+import type { AgentProfile } from '@/stores/auth-store'
 
 export type { CreemProduct } from '@/lib/creem'
 
@@ -204,6 +205,7 @@ export interface AmountRequest {
  * User wallet data
  */
 export interface UserWalletData {
+  agent_profile?: AgentProfile | null
   /** User ID */
   id: number
   /** Username */
