@@ -277,24 +277,9 @@ func CreateAgentSimplePayment(c *gin.Context) {
 	}
 	publicID := common.GetUUID()
 	token := common.GetRandomString(64)
-	order, err := model.CreateAgentSimplePaymentOrder(identity, request, publicID, token, tradeNo, "", "", paymentReturnPath(""))
-	if err != nil {
-		writeAgentSimpleError(c, err)
-		return
-	}
-	if order.PaymentURL != "" && order.PaymentParams != "" {
-		var existingParams map[string]string
-		if common.UnmarshalJsonStr(order.PaymentParams, &existingParams) != nil {
-			writeAgentSimpleError(c, model.ErrAgentSimpleInvariant)
-			return
-		}
-		common.ApiSuccess(c, gin.H{"order": order, "payment_url": order.PaymentURL, "payment_params": existingParams})
-		return
-	}
-	tradeNo = order.TradeNo
 	amount := decimal.NewFromInt(request.SalePriceFen).Div(decimal.NewFromInt(100)).StringFixed(2)
 	callbackAddress := service.GetCallbackAddress()
-	returnURL, err := url.Parse(order.CustomerURL)
+	returnURL, err := url.Parse(strings.TrimRight(paymentReturnPath(""), "/") + "/agent-pay/" + publicID + "#token=" + token)
 	if err != nil {
 		writeAgentSimpleError(c, model.ErrAgentSimpleInvalid)
 		return
@@ -314,12 +299,17 @@ func CreateAgentSimplePayment(c *gin.Context) {
 		writeAgentSimpleError(c, model.ErrAgentSimpleInvalid)
 		return
 	}
-	result, err := model.AttachAgentSimplePaymentGateway(identity, request.RequestID, paymentURL, string(encodedParams), paymentReturnPath(""))
+	order, err := model.CreateAgentSimplePaymentOrder(identity, request, publicID, token, tradeNo, paymentURL, string(encodedParams), paymentReturnPath(""))
 	if err != nil {
 		writeAgentSimpleError(c, err)
 		return
 	}
-	common.ApiSuccess(c, gin.H{"order": result, "payment_url": paymentURL, "payment_params": params})
+	var storedParams map[string]string
+	if common.UnmarshalJsonStr(order.PaymentParams, &storedParams) != nil {
+		writeAgentSimpleError(c, model.ErrAgentSimpleInvariant)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"order": order, "payment_url": order.PaymentURL, "payment_params": storedParams})
 }
 
 func GetAgentSimplePayments(c *gin.Context) {

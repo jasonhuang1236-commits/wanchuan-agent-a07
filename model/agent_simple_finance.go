@@ -182,7 +182,10 @@ func RecordAgentSimpleWithdrawal(identity AuthSessionIdentity, request AgentSimp
 			return ErrAgentSimpleInsufficient
 		}
 		available, err := referralAvailableQuotaTx(tx, request.UserID)
-		if err != nil || available < request.ReferralQuota {
+		if err != nil {
+			return err
+		}
+		if request.ReferralQuota > 0 && available < request.ReferralQuota {
 			return ErrAgentSimpleInsufficient
 		}
 		now := time.Now().In(agentSimpleLocation)

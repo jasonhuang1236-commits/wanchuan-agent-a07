@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func simpleAccountingFixture(t *testing.T) (AuthSessionIdentity, AuthSessionIdentity) {
@@ -30,6 +32,57 @@ func simpleAccountingPayment(t *testing.T, identity AuthSessionIdentity, referen
 	_, err = SettleAgentSimplePaymentByTradeNo(reference, "alipay", fmt.Sprintf("%d.%02d", price/100, price%100))
 	require.NoError(t, err)
 	return order
+}
+
+func TestAgentSimplePaymentCreationPersistsCompleteGatewayAndReplaysOriginal(t *testing.T) {
+	_, agent := simpleAccountingFixture(t)
+	request := AgentSimplePaymentRequest{RequestID: "a07-atomic-payment", Name: "Atomic payment", Quota: 500_000, SalePriceFen: 120, PaymentMethod: "alipay"}
+	token := "synthetic-atomic-payment-token-000000000000000000000"
+	_, err := CreateAgentSimplePaymentOrder(agent, request, "a07-atomic-public", token, "a07-atomic-trade", "", "", "https://example.test")
+	require.ErrorIs(t, err, ErrAgentSimpleInvalid, "never publish an unpayable pending link")
+	first, err := CreateAgentSimplePaymentOrder(agent, request, "a07-atomic-public", token, "a07-atomic-trade", "https://pay.example.test/submit", `{"out_trade_no":"a07-atomic-trade"}`, "https://example.test")
+	require.NoError(t, err)
+	replay, err := CreateAgentSimplePaymentOrder(agent, request, "a07-retry-public", token+"1", "a07-retry-trade", "https://other.example.test/submit", `{"out_trade_no":"a07-retry-trade"}`, "https://example.test")
+	require.NoError(t, err)
+	assert.Equal(t, first.ID, replay.ID)
+	assert.Equal(t, first.CustomerURL, replay.CustomerURL)
+	assert.Equal(t, first.TradeNo, replay.TradeNo)
+	assert.Equal(t, first.PaymentURL, replay.PaymentURL)
+	assert.Equal(t, first.PaymentParams, replay.PaymentParams)
+	public, err := GetAgentSimplePublicPayment(first.PublicID, token)
+	require.NoError(t, err)
+	assert.Equal(t, first.PaymentURL, public.PaymentURL)
+	assert.Equal(t, first.PaymentParams, public.PaymentParams)
+	assert.Empty(t, public.RedemptionKey)
+	var count int64
+	require.NoError(t, DB.Model(&AgentSimplePaymentOrder{}).Count(&count).Error)
+	assert.EqualValues(t, 1, count)
+}
+
+func TestAgentSimpleRefundedPaymentAcknowledgesOriginalSuccessWithoutRecredit(t *testing.T) {
+	root, agent := simpleAccountingFixture(t)
+	order := simpleAccountingPayment(t, agent, "a07-refunded-replay", 120)
+	err := RefundAgentSimplePayment(root, AgentSimplePaymentRefundCommand{RequestID: "a07-refunded-replay-refund", OrderID: order.ID, Reason: "Synthetic customer refund", Evidence: "Synthetic refund receipt"})
+	require.NoError(t, err)
+	for range 2 {
+		done, err := SettleAgentSimplePaymentByTradeNo(order.TradeNo, "alipay", "1.20")
+		require.NoError(t, err)
+		assert.True(t, done)
+		require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+			done, err = SettleAgentSimplePaymentCallbackTx(tx, order.TradeNo, "alipay", "1.20", common.GetTimestamp())
+			assert.True(t, done)
+			return err
+		}))
+	}
+	_, err = SettleAgentSimplePaymentByTradeNo(order.TradeNo, "alipay", "1.19")
+	require.ErrorIs(t, err, ErrPaymentAmountMismatch)
+	var stored AgentSimplePaymentOrder
+	require.NoError(t, DB.First(&stored, order.ID).Error)
+	assert.Equal(t, AgentSimplePaymentRefunded, stored.Status)
+	var account AgentSimpleAccount
+	require.NoError(t, DB.First(&account, agent.UserID).Error)
+	assert.Zero(t, account.PaymentAvailableQuota)
+	assert.Zero(t, account.PaymentPendingQuota)
 }
 
 func TestAgentSimpleRedeemedPaymentProfitStillMaturesExactlyOnce(t *testing.T) {
@@ -136,6 +189,56 @@ func TestAgentSimpleCodeAutomaticallyCombinesOwnBalanceAndCredit(t *testing.T) {
 	require.NoError(t, DB.First(&account, agent.UserID).Error)
 	assert.Zero(t, account.CreditOutstandingQuota)
 	assert.EqualValues(t, 90, simpleAvailableCredit(&account))
+}
+
+func TestAgentSimpleMixedCodeReturnRepaysExistingDebtBeforeRestoringBalance(t *testing.T) {
+	for _, scenario := range []struct {
+		name                               string
+		cash, spentFace, wantCash, wantDue int64
+	}{
+		{"partial_debt", 50, 100, 0, 45},
+		{"debt_fully_paid", 50, 20, 30, 0},
+		{"credit_release_is_not_cash", 0, 100, 0, 90},
+	} {
+		for _, expire := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/expire=%t", scenario.name, expire), func(t *testing.T) {
+				_, agent := simpleAccountingFixture(t)
+				const unit int64 = 500_000
+				require.NoError(t, DB.Model(&AgentSimpleAccount{}).Where("agent_user_id = ?", agent.UserID).Updates(map[string]any{"cash_quota": scenario.cash * unit, "credit_limit_quota": 300 * unit}).Error)
+				returned, err := CreateAgentSimpleCode(agent, AgentSimpleCodeRequest{RequestID: "a07-return-reserved", Name: "Returned code", Quota: 100 * unit, Mode: AgentSimpleCodeDirect})
+				require.NoError(t, err)
+				spent, err := CreateAgentSimpleCode(agent, AgentSimpleCodeRequest{RequestID: "a07-return-spent", Name: "Redeemed credit code", Quota: scenario.spentFace * unit, Mode: AgentSimpleCodeDirect})
+				require.NoError(t, err)
+				_, err = Redeem(spent.Key, agentTestRecipientID)
+				require.NoError(t, err)
+				_, err = runAgentSimpleWeeklySettlementAt(context.Background(), 100, time.Now().In(agentSimpleLocation).AddDate(0, 0, 8))
+				require.NoError(t, err)
+				request := AgentSimpleCodeCancelRequest{RequestID: "a07-return-cancel", CodeID: returned.Id, Version: int64(returned.BudgetVersion), Reason: "Synthetic unissued code return"}
+				if expire {
+					require.NoError(t, DB.Model(returned).Update("expired_time", common.GetTimestamp()-1).Error)
+				}
+				for range 2 {
+					if expire {
+						_, err = ReleaseExpiredAgentRedemptions(100)
+					} else {
+						_, err = CancelAgentSimpleCode(agent, request)
+					}
+					require.NoError(t, err)
+				}
+				var account AgentSimpleAccount
+				require.NoError(t, DB.First(&account, agent.UserID).Error)
+				assert.Equal(t, scenario.wantCash*unit, account.CashQuota)
+				assert.Equal(t, scenario.wantDue*unit, account.CreditOutstandingQuota)
+				assert.Zero(t, account.CreditReservedQuota)
+				var debt AgentSimpleCreditDebt
+				require.NoError(t, DB.Where("code_id = ?", spent.Id).First(&debt).Error)
+				assert.Equal(t, scenario.wantDue*unit, debt.Quota-debt.PaidQuota)
+				var bill AgentSimpleBill
+				require.NoError(t, DB.First(&bill, debt.BillID).Error)
+				assert.Equal(t, scenario.wantDue*unit, bill.Quota-bill.PaidQuota)
+			})
+		}
+	}
 }
 
 func TestAgentSimpleRechargeRepaysDiscountedDebtBeforeAddingCashQuota(t *testing.T) {

@@ -147,7 +147,7 @@ func (*AgentSimpleCodeAllocation) BeforeDelete(*gorm.DB) error { return ErrAgent
 type AgentSimplePaymentOrder struct {
 	ID              int64  `json:"id" gorm:"primaryKey"`
 	RequestKey      string `json:"-" gorm:"type:varchar(128);not null;uniqueIndex"`
-	PublicID        string `json:"public_id" gorm:"type:char(36);not null;uniqueIndex"`
+	PublicID        string `json:"public_id" gorm:"type:varchar(36);not null;uniqueIndex"`
 	TokenHash       string `json:"-" gorm:"type:char(64);not null;uniqueIndex"`
 	TokenCipher     string `json:"-" gorm:"type:text;not null"`
 	AgentUserID     int    `json:"agent_user_id" gorm:"not null;index"`
@@ -799,7 +799,7 @@ func SettleAgentSimplePaymentByTradeNo(tradeNo, paymentMethod, callbackMoney str
 		if !callback.Equal(expected) {
 			return ErrPaymentAmountMismatch
 		}
-		if order.Status == AgentSimplePaymentPaid || order.Status == AgentSimplePaymentRedeemed {
+		if order.Status == AgentSimplePaymentPaid || order.Status == AgentSimplePaymentRedeemed || order.Status == AgentSimplePaymentRefunded {
 			result = true
 			return nil
 		}
@@ -838,7 +838,7 @@ func SettleAgentSimplePaymentCallbackTx(tx *gorm.DB, tradeNo, paymentMethod, cal
 	if !callback.Equal(expected) {
 		return false, ErrPaymentAmountMismatch
 	}
-	if order.Status == AgentSimplePaymentPaid || order.Status == AgentSimplePaymentRedeemed {
+	if order.Status == AgentSimplePaymentPaid || order.Status == AgentSimplePaymentRedeemed || order.Status == AgentSimplePaymentRefunded {
 		return true, nil
 	}
 	if order.Status != AgentSimplePaymentPending && order.Status != AgentSimplePaymentExpired && order.Status != AgentSimplePaymentClosed {
@@ -1062,6 +1062,9 @@ func WithdrawAgentSimplePaymentProfit(identity AuthSessionIdentity, request Agen
 }
 
 func CreateAgentSimplePaymentOrder(identity AuthSessionIdentity, request AgentSimplePaymentRequest, publicID, token, tradeNo, paymentURL, paymentParams, publicBase string) (*AgentSimplePaymentOrderView, error) {
+	if strings.TrimSpace(paymentURL) == "" || strings.TrimSpace(paymentParams) == "" {
+		return nil, ErrAgentSimpleInvalid
+	}
 	if validateAgentSimpleRequestID(request.RequestID) != nil || validateAgentSimpleAmount(request.Quota) != nil || request.SalePriceFen <= 0 || request.SalePriceFen > int64(common.MaxWalletQuota) || strings.TrimSpace(request.Name) == "" || len(request.Name) > 80 || strings.TrimSpace(request.PaymentMethod) == "" || strings.TrimSpace(publicID) == "" || validateAgentSimplePaymentToken(token) != nil || tradeNo == "" || strings.TrimSpace(publicBase) == "" {
 		return nil, ErrAgentSimpleInvalid
 	}
@@ -1520,19 +1523,43 @@ func releaseAgentSimpleCodeTx(tx *gorm.DB, account *AgentSimpleAccount, code *Re
 	if err := lockForUpdate(tx).Where("redemption_id = ? AND state = ?", code.Id, AgentSimpleAllocationReserved).Find(&allocations).Error; err != nil {
 		return err
 	}
+	var ownReturned int64
+	for _, allocation := range allocations {
+		if allocation.AgentUserID != account.AgentUserID || allocation.Quota <= 0 || allocation.Quota > int64(code.Quota)-ownReturned {
+			return ErrAgentSimpleInvariant
+		}
+		if allocation.Source != AgentSimpleSourceCredit {
+			ownReturned += allocation.Quota
+		}
+	}
+	var offsetFace, repayment int64
+	if code.AgentSimpleCredit && ownReturned > 0 && account.CreditOutstandingQuota > 0 {
+		// Returned own funding pays existing discounted debt first. Releasing
+		// unused credit restores capacity only and never creates a repayment.
+		offsetFace = min(ownReturned, account.CreditOutstandingQuota*10/9)
+		if offsetFace > 0 {
+			repayment = agentSimpleCodeCost(offsetFace)
+		}
+	}
 	total := int64(0)
 	for i := range allocations {
 		a := &allocations[i]
 		total += a.Quota
+		restored := a.Quota
+		if a.Source != AgentSimpleSourceCredit {
+			used := min(offsetFace, restored)
+			restored -= used
+			offsetFace -= used
+		}
 		switch a.Source {
 		case AgentSimpleSourceCash:
-			account.CashQuota += a.Quota
+			account.CashQuota += restored
 		case AgentSimpleSourceReward:
-			account.RewardQuota += a.Quota
+			account.RewardQuota += restored
 		case AgentSimpleSourceRoot:
-			account.RootQuota += a.Quota
+			account.RootQuota += restored
 		case AgentSimpleSourcePayment:
-			account.PaymentQuota += a.Quota
+			account.PaymentQuota += restored
 		case AgentSimpleSourceCredit:
 			// Credit capacity was released above; no cash balance is created.
 		default:
@@ -1545,6 +1572,9 @@ func releaseAgentSimpleCodeTx(tx *gorm.DB, account *AgentSimpleAccount, code *Re
 	}
 	if total != int64(code.Quota) {
 		return ErrAgentSimpleInvariant
+	}
+	if err := applyAgentSimpleRepaymentTx(tx, account, repayment); err != nil {
+		return err
 	}
 	account.LastActivityAt = common.GetTimestamp()
 	return saveAgentSimpleAccountTx(tx, before, account, actorID, "code_release", "redemption", strconv.Itoa(code.Id), reason, requestID)

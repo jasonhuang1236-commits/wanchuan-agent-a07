@@ -53,10 +53,6 @@ func TestMain(m *testing.M) {
 
 	if nativeDSN != "" {
 		common.SetDatabaseTypes(common.DatabaseTypePostgreSQL, common.DatabaseTypePostgreSQL)
-		var version string
-		if err := db.Raw("SHOW server_version_num").Scan(&version).Error; err != nil || version != "180006" {
-			panic("native model tests require PostgreSQL 18.6")
-		}
 	} else if mysqlDSN != "" {
 		common.SetDatabaseTypes(common.DatabaseTypeMySQL, common.DatabaseTypeMySQL)
 	} else {

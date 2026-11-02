@@ -41,6 +41,12 @@ func installDatabaseCompatRegistry(t *testing.T) {
 		Phase:     extension.PhaseAfterCoreModels,
 		Models:    []any{&SupportTicket{}, &SupportTicketMessage{}},
 	}))
+	require.NoError(t, reg.RegisterModelSet(extension.ModelSet{
+		Extension: "chuanapi",
+		Name:      "agent_platform_models",
+		Phase:     extension.PhaseAfterCoreModels,
+		Models:    AgentPlatformModels(),
+	}))
 	require.NoError(t, reg.RegisterDataStep(extension.DataStep{
 		Extension: "chuanapi",
 		Name:      "legacy_quota_backfill",
@@ -48,6 +54,23 @@ func installDatabaseCompatRegistry(t *testing.T) {
 		Run: func(db *gorm.DB) error {
 			_, err := BackfillLegacyQuotaAccountsWithDB(db)
 			return err
+		},
+	}))
+	require.NoError(t, reg.RegisterDataStep(extension.DataStep{
+		Extension: "chuanapi",
+		Name:      "agent_platform_legacy_provenance",
+		Phase:     extension.PhaseAfterCoreData,
+		Run: func(db *gorm.DB) error {
+			if err := MigrateLegacyAgentProfiles(db); err != nil {
+				return err
+			}
+			if err := MigrateLegacyAgentFundsWithDB(db); err != nil {
+				return err
+			}
+			if err := MigrateAgentFundEconomicsWithDB(db); err != nil {
+				return err
+			}
+			return MigrateAgentSimpleA07WithDB(db)
 		},
 	}))
 	require.NoError(t, extension.SetDefault(reg))
@@ -146,6 +169,13 @@ func TestDatabaseCompatibilityReal(t *testing.T) {
 	} {
 		require.Truef(t, DB.Migrator().HasTable(table), "migrateDB did not create %s on %s", name, dialect)
 	}
+	for _, schema := range AgentPlatformModels() {
+		require.True(t, DB.Migrator().HasTable(schema), "production startup must migrate every agent model")
+	}
+	var agentMigration AgentSimpleMigration
+	require.NoError(t, DB.First(&agentMigration, 1).Error)
+	require.Positive(t, agentMigration.CompletedAt)
+	require.Equal(t, agentMigration.Transferred, agentMigration.Credited)
 
 	// Values above int32 prove that the wallet mirror and paid account survive
 	// actual round-trips on the target database rather than only looking correct

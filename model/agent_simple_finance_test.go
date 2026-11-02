@@ -36,6 +36,26 @@ func TestAgentSimpleWithdrawalCombinesSourcesAndSharesMonthlyLimit(t *testing.T)
 	require.ErrorIs(t, err, ErrAgentSimpleConflict, "source changes cannot bypass the calendar-month limit")
 }
 
+func TestAgentSimpleWithdrawalKeepsReferralRecoverySeparateFromPaymentIncome(t *testing.T) {
+	root, agent := simpleAccountingFixture(t)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", agent.UserID).Update("aff_quota", -500_000).Error)
+	require.NoError(t, DB.Model(&AgentSimpleAccount{}).Where("agent_user_id = ?", agent.UserID).Updates(map[string]any{"payment_total_quota": 10_000_000, "payment_available_quota": 10_000_000}).Error)
+	request := AgentSimpleWithdrawalRequest{RequestID: "a07-negative-referral", UserID: agent.UserID, PaymentQuota: 10_000_000, Reason: "Synthetic payment income payout", Evidence: "Synthetic completed payout"}
+	withReferral := request
+	withReferral.ReferralQuota = 1
+	_, err := RecordAgentSimpleWithdrawal(root, withReferral)
+	require.ErrorIs(t, err, ErrAgentSimpleInsufficient)
+	result, err := RecordAgentSimpleWithdrawal(root, request)
+	require.NoError(t, err, "a referral recovery must not block independent payment income")
+	assert.EqualValues(t, 10_000_000, result.PaymentQuota)
+	assert.Zero(t, result.ReferralQuota)
+	assert.Equal(t, -500_000, getUserBalances(t, agent.UserID).AffQuota)
+	var account AgentSimpleAccount
+	require.NoError(t, DB.First(&account, agent.UserID).Error)
+	assert.Zero(t, account.PaymentAvailableQuota)
+	assert.EqualValues(t, 10_000_000, account.PaymentWithdrawnQuota)
+}
+
 func TestAgentSimpleWithdrawalOrdinaryUserAndFrozenRewardGuards(t *testing.T) {
 	root, agent := simpleAccountingFixture(t)
 	user := User{Username: "a07-withdraw-ordinary", AffCode: "a07-withdraw-ordinary", Status: common.UserStatusEnabled, AffQuota: 10_000_000}
@@ -185,7 +205,7 @@ func TestAgentSimpleRootStatusCreatesProfileAndPauseClosesUnpaidLinks(t *testing
 	require.NoError(t, err, "pausing sales must preserve read access to balances")
 }
 
-func TestAgentSimpleExitMovesRewardToWalletAndCashExitKeepsRefundFormula(t *testing.T) {
+func TestAgentSimpleExitMovesRewardToWalletExactlyOnce(t *testing.T) {
 	root, agent := simpleAccountingFixture(t)
 	require.NoError(t, DB.Model(&AgentSimpleAccount{}).Where("agent_user_id = ?", agent.UserID).Updates(map[string]any{"status": AgentSimpleStatusCancelled, "reward_quota": 1_000_000, "root_quota": 0}).Error)
 	record, err := SettleAgentSimpleExit(root, AgentSimpleExitRequest{RequestID: "a07-exit-to-wallet", AgentUserID: agent.UserID, Quota: 1_000_000, Source: "income", Target: "wallet", Reason: "Move remaining reward", Evidence: "Synthetic exit evidence"})
@@ -200,4 +220,31 @@ func TestAgentSimpleExitMovesRewardToWalletAndCashExitKeepsRefundFormula(t *test
 	replay, err := SettleAgentSimpleExit(root, AgentSimpleExitRequest{RequestID: "a07-exit-to-wallet", AgentUserID: agent.UserID, Quota: 1_000_000, Source: "income", Target: "wallet", Reason: "Move remaining reward", Evidence: "Synthetic exit evidence"})
 	require.NoError(t, err)
 	assert.Equal(t, record.ID, replay.ID)
+}
+
+func TestAgentSimpleCashExitRecordsDiscountFeeAndFenRoundingExactlyOnce(t *testing.T) {
+	for _, scenario := range []struct {
+		name          string
+		quota, netFen int64
+	}{{"thousand_dollars", 500_000_000, 87_300}, {"fractional_fen", 505_000, 88}} {
+		t.Run(scenario.name, func(t *testing.T) {
+			root, agent := simpleAccountingFixture(t)
+			require.NoError(t, DB.Model(&AgentSimpleAccount{}).Where("agent_user_id = ?", agent.UserID).Updates(map[string]any{"status": AgentSimpleStatusPaused, "cash_quota": scenario.quota}).Error)
+			request := AgentSimpleExitRequest{RequestID: "a07-exit-cash-refund", AgentUserID: agent.UserID, Quota: scenario.quota, Source: "cash", Target: "refund", Reason: "Synthetic cash refund", Evidence: "Synthetic completed refund"}
+			first, err := SettleAgentSimpleExit(root, request)
+			require.NoError(t, err)
+			assert.Equal(t, scenario.netFen, first.NetFen)
+			replay, err := SettleAgentSimpleExit(root, request)
+			require.NoError(t, err)
+			assert.Equal(t, first.ID, replay.ID)
+			var account AgentSimpleAccount
+			require.NoError(t, DB.First(&account, agent.UserID).Error)
+			assert.Zero(t, account.CashQuota)
+			assert.Zero(t, getUserBalances(t, agent.UserID).QuotaPaid)
+			request.RequestID = "a07-exit-income-not-cash"
+			request.Source = "income"
+			_, err = SettleAgentSimpleExit(root, request)
+			require.ErrorIs(t, err, ErrAgentSimpleInvalid)
+		})
+	}
 }

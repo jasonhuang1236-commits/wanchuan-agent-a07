@@ -2,6 +2,7 @@ package model
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -41,10 +42,15 @@ func TestAgentSimpleSchemaFreshUpgradeAndRepeatedMigration(t *testing.T) {
 	t.Logf("A07 real database: dialect=%s version=%s", common.MainDatabaseType(), version)
 	for _, mode := range []string{"fresh", "upgrade"} {
 		t.Run(mode, func(t *testing.T) {
-			require.NoError(t, DB.Migrator().DropTable(&ReferralCommission{}))
+			for _, schema := range AgentPlatformModels() {
+				require.NoError(t, DB.Migrator().DropTable(schema))
+			}
+			require.NoError(t, DB.Migrator().DropTable(&ReferralCommission{}, &TopUp{}, &Redemption{}))
 			if mode == "upgrade" {
-				require.NoError(t, DB.AutoMigrate(&a07LegacyReferral{}))
+				require.NoError(t, DB.AutoMigrate(&a07LegacyReferral{}, &a07LegacyRedemption{}, &a07LegacyTopUp{}))
 				require.NoError(t, DB.Create(&a07LegacyReferral{Id: 9701, UserId: 9702, SourceUserId: 9703, ReferenceType: "topup", ReferenceId: "a07-prior-release", PaidQuota: 3_000_000_000, RewardQuota: 150_000_000, Rate: .05}).Error)
+				require.NoError(t, DB.Create(&a07LegacyRedemption{Id: 9711, UserId: 9702, Key: strings.Repeat("a", 32), Name: "Existing code", Quota: 3_000_000_000, Status: common.RedemptionCodeStatusUsed, UsedUserId: 9703, RedeemedTime: 1_700_000_000}).Error)
+				require.NoError(t, DB.Create(&a07LegacyTopUp{Id: 9721, UserId: 9703, Amount: 10_000, Money: 10_000, TradeNo: "a07-existing-payment", PaymentMethod: "alipay", PaymentProvider: PaymentProviderEpay, Status: common.TopUpStatusSuccess, PaidAmountMinor: 1_000_000}).Error)
 			}
 			for range 2 {
 				require.NoError(t, DB.AutoMigrate(&ReferralCommission{}))
@@ -63,6 +69,23 @@ func TestAgentSimpleSchemaFreshUpgradeAndRepeatedMigration(t *testing.T) {
 				assert.Zero(t, row.MaturesAt)
 				row.Id = 0
 				require.Error(t, DB.Create(&row).Error, "upgrade preserves reference uniqueness")
+				var code Redemption
+				require.NoError(t, DB.First(&code, 9711).Error)
+				assert.EqualValues(t, 3_000_000_000, code.Quota)
+				assert.Equal(t, common.RedemptionCodeStatusUsed, code.Status)
+				assert.Equal(t, 9703, code.UsedUserId)
+				assert.EqualValues(t, 1_700_000_000, code.RedeemedTime)
+				assert.Empty(t, code.AgentSimpleMode)
+				assert.False(t, code.AgentSimpleCredit)
+				code.Id = 0
+				require.Error(t, DB.Create(&code).Error, "upgrade preserves code uniqueness")
+				var payment TopUp
+				require.NoError(t, DB.First(&payment, 9721).Error)
+				assert.Equal(t, common.TopUpStatusSuccess, payment.Status)
+				assert.EqualValues(t, 1_000_000, payment.PaidAmountMinor)
+				assert.False(t, payment.AgentSimpleTopUp)
+				payment.Id = 0
+				require.Error(t, DB.Create(&payment).Error, "upgrade preserves payment trade uniqueness")
 			}
 		})
 	}
