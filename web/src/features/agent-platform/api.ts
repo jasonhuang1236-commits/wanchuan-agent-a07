@@ -69,11 +69,19 @@ export async function postPlatform<T>(
 export async function prepareOperation(
   draft: OperationDraft
 ): Promise<PreparedOperation> {
-  const prepared = await postPlatform<unknown>('/operations/prepare', {
-    action: draft.action,
-    request_id: draft.request_id,
-    payload: draft.payload,
+  const path = draft.action.startsWith('redemption.admin.')
+    ? '/api/redemption/operations/prepare'
+    : `${PLATFORM_ROOT}/operations/prepare`
+  const response = await api.request<Response<unknown>>({
+    method: 'post',
+    url: path,
+    data: {
+      action: draft.action,
+      request_id: draft.request_id,
+      payload: draft.payload,
+    },
   })
+  const prepared = requireServerSuccess(response.data).data
   return validatePreparedOperation(prepared, draft)
 }
 
@@ -176,9 +184,14 @@ export async function recoverOperation(
   draft: Pick<OperationDraft, 'request_id'> &
     Partial<Pick<OperationDraft, 'action'>>
 ): Promise<OperationStatus> {
-  const raw = await getPlatform<unknown>(
-    `/operations/${encodeURIComponent(draft.request_id)}`
+  const platformCode = draft.action?.startsWith('redemption.admin.')
+  const response = await api.get<Response<unknown>>(
+    platformCode
+      ? `/api/redemption/operations/${encodeURIComponent(draft.request_id)}`
+      : `${PLATFORM_ROOT}/operations/${encodeURIComponent(draft.request_id)}`,
+    { params: undefined, signal: undefined }
   )
+  const raw = requireServerSuccess(response.data).data
   const result = z
     .object({
       request_id: z.literal(draft.request_id),

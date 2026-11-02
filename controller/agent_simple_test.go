@@ -111,4 +111,29 @@ func TestAgentSimpleHTTPRechargeReplayAndSignedPaymentDelivery(t *testing.T) {
 	assert.Positive(t, order.PaymentReceiptID)
 	require.NoError(t, db.Model(&model.Redemption{}).Count(&count).Error)
 	assert.EqualValues(t, 1, count)
+	require.NoError(t, db.Model(&user).Update("role", common.RoleRootUser).Error)
+	prepared := perform(`{"action":"redemption.admin.create","request_id":"a07-platform-create","payload":{"name":"Platform code","quota":500000,"count":1,"expired_time":0}}`, PreparePlatformRedemption)
+	require.Equal(t, http.StatusOK, prepared.Code, prepared.Body.String())
+	assert.Contains(t, prepared.Body.String(), `"success":true`)
+	assert.Contains(t, prepared.Body.String(), `/api/redemption/operations/a07-platform-create`)
+	rejected := perform(`{"request_id":"a07-platform-create","name":"Platform code","quota":500000,"count":1,"expired_time":0}`, AddRedemption)
+	assert.NotContains(t, rejected.Body.String(), `"success":true`, "platform code writes still require the existing bound verification proof")
+}
+
+func TestPlatformRedemptionPreparationRejectsRetiredAgentActionsBeforeDatabaseAccess(t *testing.T) {
+	previousDB := model.DB
+	model.DB = nil
+	t.Cleanup(func() { model.DB = previousDB })
+	for _, action := range []string{"purchase.create", "redemption.allocate", "redemption.create", "commission.withdraw.request", "policy.publish"} {
+		response := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(response)
+		body := `{"action":"` + action + `","request_id":"synthetic-action","payload":{}}`
+		ctx.Request = httptest.NewRequest(http.MethodPost, "/api/redemption/operations/prepare", strings.NewReader(body))
+		ctx.Set("id", 1)
+		ctx.Set("session_id", "synthetic-session")
+		ctx.Set("auth_version", int64(1))
+		ctx.Set("session_version", int64(1))
+		PreparePlatformRedemption(ctx)
+		assert.Equal(t, http.StatusBadRequest, response.Code, action)
+	}
 }

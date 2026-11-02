@@ -80,7 +80,9 @@ export function transactionNetwork() {
         recipient_label: '',
         policy_version: 1,
       },
-      status_url: `/api/agent-platform/operations/${draft.request_id}`,
+      status_url: draft.action.startsWith('redemption.admin.')
+        ? `/api/redemption/operations/${draft.request_id}`
+        : `/api/agent-platform/operations/${draft.request_id}`,
     }
   })
   const verify = vi.fn().mockImplementation(async () => ({
@@ -132,7 +134,10 @@ export function transactionNetwork() {
       : previousPost(url, data, config)
   )
   vi.spyOn(api, 'request').mockImplementation(async (config) => {
-    if (config.url === '/api/agent-platform/operations/prepare') {
+    if (
+      config.url === '/api/agent-platform/operations/prepare' ||
+      config.url === '/api/redemption/operations/prepare'
+    ) {
       return {
         data: { success: true, data: prepare(config.data as OperationDraft) },
       }

@@ -342,6 +342,8 @@ func SetApiRouter(router *gin.Engine) extension.RouteScopes {
 		redemptionRoute := apiRouter.Group("/redemption")
 		redemptionRoute.Use(middleware.DisableCache(), middleware.AgentRedemptionAuth())
 		{
+			redemptionRoute.POST("/operations/prepare", middleware.AdminAuth(), middleware.AgentBrowserSessionRequired(), middleware.UserCriticalRateLimit("platform-codes"), controller.PreparePlatformRedemption)
+			redemptionRoute.GET("/operations/:request_id", middleware.AdminAuth(), middleware.AgentBrowserSessionRequired(), controller.GetPlatformRedemptionOperation)
 			redemptionRoute.GET("/", controller.GetAllRedemptions)
 			redemptionRoute.GET("/search", controller.SearchRedemptions)
 			redemptionRoute.GET("/:id", controller.GetRedemption)
