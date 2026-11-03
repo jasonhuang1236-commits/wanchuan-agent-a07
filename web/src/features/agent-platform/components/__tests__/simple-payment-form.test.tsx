@@ -8,23 +8,28 @@ import { useSystemConfigStore } from '@/stores/system-config-store'
 import { SimplePaymentForm } from '../simple-payment-form'
 
 beforeEach(() => {
-  useSystemConfigStore
-    .getState()
-    .setConfig({
-      currency: {
-        displayInCurrency: true,
-        customCurrencySymbol: '$',
-        customCurrencyExchangeRate: 1,
-        quotaDisplayType: 'USD',
-        quotaPerUnit: 500_000,
-        usdExchangeRate: 1,
-      },
-    })
+  useSystemConfigStore.getState().setConfig({
+    currency: {
+      displayInCurrency: true,
+      customCurrencySymbol: '$',
+      customCurrencyExchangeRate: 1,
+      quotaDisplayType: 'USD',
+      quotaPerUnit: 500_000,
+      usdExchangeRate: 1,
+    },
+  })
   vi.spyOn(api, 'get').mockResolvedValue({
     data: {
       success: true,
       data: [
-        { payment_method: 'alipay', enabled: true, fee_bps: 100, version: 2 },
+        {
+          payment_method: 'wxpay',
+          name: '微信',
+          icon: 'SiWechat',
+          enabled: true,
+          fee_bps: 100,
+          version: 2,
+        },
       ],
     },
   })
@@ -83,6 +88,11 @@ test('previews authoritative costs before creating a link and QR code', async ()
       },
     })
   mount()
+  const paymentMethod = await screen.findByRole('combobox', {
+    name: 'Payment method',
+  })
+  expect(paymentMethod).toHaveValue('wxpay')
+  expect(paymentMethod).toHaveDisplayValue('微信')
   await preview()
   expect(
     await screen.findByRole('heading', { name: 'Review customer payment' })
@@ -105,26 +115,25 @@ test('previews authoritative costs before creating a link and QR code', async ()
       quota: 500_000,
       sale_price_fen: 120,
       fee_version: 2,
+      payment_method: 'wxpay',
       request_id: expect.any(String),
     },
   })
 })
 
 test('below-minimum preview blocks creation and edit keeps the entered values', async () => {
-  const request = vi
-    .spyOn(api, 'request')
-    .mockResolvedValue({
+  const request = vi.spyOn(api, 'request').mockResolvedValue({
+    data: {
+      success: true,
       data: {
-        success: true,
-        data: {
-          ...quote,
-          sale_price_fen: 90,
-          fee_fen: 1,
-          profit_quota: 0,
-          price_valid: false,
-        },
+        ...quote,
+        sale_price_fen: 90,
+        fee_fen: 1,
+        profit_quota: 0,
+        price_valid: false,
       },
-    })
+    },
+  })
   mount()
   await preview('0.90')
   expect(await screen.findByRole('alert')).toHaveTextContent(

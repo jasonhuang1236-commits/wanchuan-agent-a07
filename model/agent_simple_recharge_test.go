@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -214,7 +215,14 @@ func TestAgentSimplePaymentNeedsExplicitFeeButRechargeCanUseConfiguredMethod(t *
 	require.ErrorIs(t, err, ErrAgentSimpleUnavailable, "unknown channel costs must not silently become zero")
 	recharge, err := GetAgentSimpleAvailablePaymentMethods(agent, "recharge")
 	require.NoError(t, err)
-	assert.Contains(t, recharge, AgentSimplePaymentFee{PaymentMethod: "wxpay", Enabled: true})
+	hasWeChat := false
+	for _, method := range recharge {
+		if method.PaymentMethod == "wxpay" && method.Enabled {
+			hasWeChat = true
+			break
+		}
+	}
+	assert.True(t, hasWeChat)
 	_, err = UpdateAgentSimplePaymentFee(root, AgentSimplePaymentFeeRequest{RequestID: "a07-explicit-channel-fee", PaymentMethod: "wxpay", FeeBPS: 100, Enabled: true, Reason: "Synthetic confirmed fee"})
 	require.NoError(t, err)
 	_, err = QuoteAgentSimplePayment("wxpay", 500_000, 90)
@@ -222,4 +230,24 @@ func TestAgentSimplePaymentNeedsExplicitFeeButRechargeCanUseConfiguredMethod(t *
 	quote, err := QuoteAgentSimplePayment("wxpay", 500_000, 91)
 	require.NoError(t, err)
 	assert.Zero(t, quote.ProfitQuota)
+}
+
+func TestAgentSimplePaymentMethodsFollowWalletChannelNamesAndAvailability(t *testing.T) {
+	root, agent := simpleAccountingFixture(t)
+	previous := operation_setting.PayMethods
+	t.Cleanup(func() { operation_setting.PayMethods = previous })
+	operation_setting.PayMethods = []map[string]string{{"type": "wxpay", "name": "微信", "icon": "SiWechat"}}
+	_, err := UpdateAgentSimplePaymentFee(root, AgentSimplePaymentFeeRequest{RequestID: "a07-wechat-channel-fee", PaymentMethod: "wxpay", FeeBPS: 100, Enabled: true, Reason: "Synthetic WeChat channel"})
+	require.NoError(t, err)
+
+	methods, err := GetAgentSimpleAvailablePaymentMethods(agent, "payment")
+	require.NoError(t, err)
+	require.Len(t, methods, 1)
+	assert.Equal(t, AgentSimplePaymentMethod{PaymentMethod: "wxpay", Name: "微信", Icon: "SiWechat", FeeBPS: 100, Enabled: true, Version: 2}, methods[0])
+
+	rechargeMethods, err := GetAgentSimpleAvailablePaymentMethods(agent, "recharge")
+	require.NoError(t, err)
+	require.Len(t, rechargeMethods, 1)
+	assert.Equal(t, "微信", rechargeMethods[0].Name)
+	assert.Equal(t, "wxpay", rechargeMethods[0].PaymentMethod)
 }

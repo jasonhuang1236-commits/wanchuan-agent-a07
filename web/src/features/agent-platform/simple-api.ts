@@ -131,6 +131,8 @@ export interface SimplePaymentOrderPage {
 
 export interface SimplePaymentMethod {
   payment_method: string
+  name: string
+  icon?: string
   fee_bps: number
   enabled: boolean
   version: number

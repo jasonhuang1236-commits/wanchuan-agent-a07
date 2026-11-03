@@ -231,7 +231,7 @@ export function SimplePaymentForm(props: { onClose: () => void }) {
       kind: 'select',
       options: methods.map((method) => ({
         value: method.payment_method,
-        label: method.payment_method,
+        label: method.name || method.payment_method,
       })),
     },
   ]

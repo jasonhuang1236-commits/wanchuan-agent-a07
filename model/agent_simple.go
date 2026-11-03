@@ -194,6 +194,15 @@ type AgentSimplePaymentFee struct {
 	UpdatedAt     int64  `json:"updated_at" gorm:"not null"`
 }
 
+type AgentSimplePaymentMethod struct {
+	PaymentMethod string `json:"payment_method"`
+	Name          string `json:"name"`
+	Icon          string `json:"icon,omitempty"`
+	FeeBPS        int    `json:"fee_bps"`
+	Enabled       bool   `json:"enabled"`
+	Version       int64  `json:"version"`
+}
+
 type AgentSimplePaymentFeeAudit struct {
 	ID            int64  `json:"id" gorm:"primaryKey"`
 	RequestID     string `json:"request_id" gorm:"type:varchar(96);uniqueIndex"`
@@ -708,7 +717,7 @@ func UpdateAgentSimplePaymentFee(identity AuthSessionIdentity, request AgentSimp
 	return &result, err
 }
 
-func GetAgentSimpleAvailablePaymentMethods(identity AuthSessionIdentity, purpose string) ([]AgentSimplePaymentFee, error) {
+func GetAgentSimpleAvailablePaymentMethods(identity AuthSessionIdentity, purpose string) ([]AgentSimplePaymentMethod, error) {
 	if identity.UserID <= 0 {
 		return nil, ErrAgentSimplePermission
 	}
@@ -718,7 +727,7 @@ func GetAgentSimpleAvailablePaymentMethods(identity AuthSessionIdentity, purpose
 	if purpose != "payment" && purpose != "recharge" && purpose != "repayment" {
 		return nil, ErrAgentSimpleInvalid
 	}
-	fees := make([]AgentSimplePaymentFee, 0)
+	fees := make([]AgentSimplePaymentMethod, 0)
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		if purpose == "repayment" {
 			if err := requireAgentSimpleHistoryTx(tx, identity, identity.UserID); err != nil {
@@ -735,11 +744,12 @@ func GetAgentSimpleAvailablePaymentMethods(identity AuthSessionIdentity, purpose
 		}
 		for _, configured := range operation_setting.PayMethods {
 			method := configured["type"]
-			if method == "" || !operation_setting.ContainsPayMethod(method) || !isSimpleEpayMethod(method) {
+			name := configured["name"]
+			if method == "" || name == "" || !operation_setting.ContainsPayMethod(method) || !isSimpleEpayMethod(method) {
 				continue
 			}
 			if purpose != "payment" {
-				fees = append(fees, AgentSimplePaymentFee{PaymentMethod: method, Enabled: true})
+				fees = append(fees, AgentSimplePaymentMethod{PaymentMethod: method, Name: name, Icon: configured["icon"], Enabled: true})
 				continue
 			}
 			fee, err := lockAgentSimplePaymentFeeTxIncludingDisabled(tx, method)
@@ -747,7 +757,7 @@ func GetAgentSimpleAvailablePaymentMethods(identity AuthSessionIdentity, purpose
 				return err
 			}
 			if fee.Enabled {
-				fees = append(fees, *fee)
+				fees = append(fees, AgentSimplePaymentMethod{PaymentMethod: method, Name: name, Icon: configured["icon"], FeeBPS: fee.FeeBPS, Enabled: fee.Enabled, Version: fee.Version})
 			}
 		}
 		return nil

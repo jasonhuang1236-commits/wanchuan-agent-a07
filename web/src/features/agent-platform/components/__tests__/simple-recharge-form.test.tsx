@@ -36,7 +36,14 @@ beforeEach(() => {
     data: {
       success: true,
       data: [
-        { payment_method: 'alipay', enabled: true, fee_bps: 0, version: 1 },
+        {
+          payment_method: 'wxpay',
+          name: '微信',
+          icon: 'SiWechat',
+          enabled: true,
+          fee_bps: 0,
+          version: 1,
+        },
       ],
     },
   })
@@ -58,6 +65,11 @@ test('a lost recharge response retries the same intent and preserves decimal inp
       },
     })
   mount()
+  const paymentMethod = await screen.findByRole('combobox', {
+    name: 'Payment method',
+  })
+  expect(paymentMethod).toHaveValue('wxpay')
+  expect(paymentMethod).toHaveDisplayValue('微信')
   const input = await screen.findByRole('textbox', {
     name: 'Agent balance to add ($)',
   })
@@ -76,7 +88,7 @@ test('a lost recharge response retries the same intent and preserves decimal inp
   expect(calls[0][0].data).toMatchObject({
     amount: '100.01',
     kind: 'recharge',
-    payment_method: 'alipay',
+    payment_method: 'wxpay',
     request_id: expect.any(String),
   })
 })

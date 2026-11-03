@@ -59,7 +59,7 @@ export function SimpleRechargeForm(props: {
 
   const methods = info.data.map((method) => ({
     type: method.payment_method,
-    name: method.payment_method,
+    name: method.name || method.payment_method,
   }))
   const fields: ActionField[] = [
     {
