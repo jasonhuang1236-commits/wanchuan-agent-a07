@@ -24,6 +24,7 @@ func TestAgentPlatformModuleMountsCompleteBrowserSurface(t *testing.T) {
 		assert.False(t, strings.HasPrefix(route.Path, "/api/agent-redemption"), "the retired budget API must not remain reachable: %s", route.Path)
 	}
 	expected := []string{
+		"GET /simple/reminders/unread", "POST /simple/reminders/acknowledge",
 		"GET /self", "GET /simple/balance", "GET /simple/codes", "POST /simple/codes", "POST /simple/codes/:id/cancel",
 		"POST /simple/recharge", "POST /simple/payment/quote", "GET /simple/payment-methods", "POST /simple/payment", "GET /simple/payment-orders",
 		"GET /simple/payment-fees", "POST /simple/payment-fees", "POST /simple/payment/refunds", "POST /simple/payment/withdrawals", "POST /simple/payment/transfer",

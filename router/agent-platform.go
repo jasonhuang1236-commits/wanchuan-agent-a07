@@ -32,6 +32,8 @@ func RegisterAgentPlatformRoutes(scopes extension.RouteScopes) error {
 		}
 	})
 	group.GET("/self", controller.GetAgentPlatformSelf)
+	group.GET("/simple/reminders/unread", controller.GetAgentSimpleUnreadReminders)
+	group.POST("/simple/reminders/acknowledge", controller.AcknowledgeAgentSimpleReminders)
 	group.GET("/simple/balance", controller.GetAgentSimpleBalance)
 	group.GET("/simple/codes", controller.GetAgentSimpleCodes)
 	group.POST("/simple/codes", controller.CreateAgentSimpleCode)

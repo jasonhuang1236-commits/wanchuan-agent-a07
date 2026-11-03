@@ -57,7 +57,7 @@ func TestAgentSimpleSchemaFreshUpgradeAndRepeatedMigration(t *testing.T) {
 				require.NoError(t, DB.AutoMigrate(AgentPlatformModels()...))
 				require.NoError(t, DB.AutoMigrate(&TopUp{}, &Redemption{}))
 			}
-			for _, schema := range []any{&AgentSimpleAccount{}, &AgentSimpleLedger{}, &AgentSimplePaymentOrder{}, &AgentSimpleCreditDebt{}, &AgentSimpleBill{}, &AgentSimpleReminder{}, &AgentSimpleExitRecord{}} {
+			for _, schema := range []any{&AgentSimpleAccount{}, &AgentSimpleLedger{}, &AgentSimplePaymentOrder{}, &AgentSimpleCreditDebt{}, &AgentSimpleBill{}, &AgentSimpleReminder{}, &AgentSimpleReminderReceipt{}, &AgentSimpleExitRecord{}} {
 				assert.True(t, DB.Migrator().HasTable(schema))
 			}
 			if mode == "upgrade" {

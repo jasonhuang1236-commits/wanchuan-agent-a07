@@ -52,6 +52,7 @@ func AgentPlatformModels() []any {
 	models = append(models, AgentSimpleModels()...)
 	models = append(models, &AgentSimpleBill{}, &AgentSimpleCreditDebt{}, &AgentSimpleReminder{}, &AgentSimpleCodeViewAudit{})
 	models = append(models, &AgentSimpleExitRecord{})
+	models = append(models, &AgentSimpleReminderReceipt{})
 	models = append(models, &AgentSimpleMigration{})
 	models = append(models, AgentFundEconomicsModels()...)
 	models = append(models, BonusSourceModels()...)

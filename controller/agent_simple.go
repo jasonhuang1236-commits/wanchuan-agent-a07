@@ -625,3 +625,37 @@ func SettleAgentSimpleExit(c *gin.Context) {
 	}
 	common.ApiSuccess(c, result)
 }
+
+func GetAgentSimpleUnreadReminders(c *gin.Context) {
+	identity, ok := agentPlatformIdentity(c)
+	if !ok {
+		writeAgentSimpleError(c, model.ErrAgentSimplePermission)
+		return
+	}
+	rows, err := model.ListUnreadAgentSimpleReminders(identity)
+	if err != nil {
+		writeAgentSimpleError(c, err)
+		return
+	}
+	common.ApiSuccess(c, rows)
+}
+
+func AcknowledgeAgentSimpleReminders(c *gin.Context) {
+	identity, ok := agentPlatformIdentity(c)
+	if !ok {
+		writeAgentSimpleError(c, model.ErrAgentSimplePermission)
+		return
+	}
+	var request struct {
+		IDs []int64 `json:"ids"`
+	}
+	if common.DecodeJsonStrict(c.Request.Body, &request) != nil {
+		writeAgentSimpleError(c, model.ErrAgentSimpleInvalid)
+		return
+	}
+	if err := model.AcknowledgeAgentSimpleReminders(identity, request.IDs); err != nil {
+		writeAgentSimpleError(c, err)
+		return
+	}
+	common.ApiSuccess(c, nil)
+}

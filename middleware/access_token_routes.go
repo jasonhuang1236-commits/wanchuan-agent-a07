@@ -70,8 +70,8 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"POST /api/agent-platform/simple/payment/transfer":          accessTokenSessionRule,
 	"POST /api/agent-platform/simple/payment/withdrawals":       accessTokenSessionRule,
 	"POST /api/agent-platform/simple/recharge":                  accessTokenSessionRule,
-
-	// Agent budgets and invitation policy are browser-only control-plane operations.
+	"GET /api/agent-platform/simple/reminders/unread":           accessTokenSessionRule,
+	"POST /api/agent-platform/simple/reminders/acknowledge":     accessTokenSessionRule,
 
 	// router/api-router.go: top level
 	"GET /api/models":                     accessTokenScopeRule("profile:read"),
