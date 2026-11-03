@@ -52,7 +52,8 @@ export function TransferDialog({
   const minimumQuota = 1
   const minimumAmount = quotaUnitsToDollars(minimumQuota)
   const maximumAmount = quotaUnitsToDollars(availableQuota)
-  const [amount, setAmount] = useState(minimumAmount)
+  const initialAmount = Math.min(1, Math.max(0, maximumAmount))
+  const [amount, setAmount] = useState(initialAmount)
   const [target, setTarget] = useState<'wallet' | 'agent'>('wallet')
   const transferQuota = parseQuotaFromDollars(amount)
   const canTransfer =
@@ -63,10 +64,10 @@ export function TransferDialog({
   useEffect(() => {
     if (open) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setAmount(minimumAmount)
+      setAmount(initialAmount)
       setTarget('wallet')
     }
-  }, [minimumAmount, open])
+  }, [initialAmount, open])
 
   const handleConfirm = async () => {
     if (!canTransfer) return
@@ -154,9 +155,6 @@ export function TransferDialog({
             step={0.01}
             className='font-mono text-lg'
           />
-          <p className='text-muted-foreground text-xs'>
-            {t('Minimum:')} {formatQuota(minimumQuota)}
-          </p>
         </div>
       </div>
     </Dialog>

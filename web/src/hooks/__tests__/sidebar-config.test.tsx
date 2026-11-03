@@ -66,6 +66,40 @@ afterEach(() => {
   useAuthStore.getState().auth.reset()
 })
 
+it('root uses one agent management entry while only agents see the sales workspace', () => {
+  for (const role of [ROLE.SUPER_ADMIN, ROLE.ADMIN, ROLE.USER]) {
+    useAuthStore.getState().auth.setUser({
+      id: 1,
+      username: 'operator',
+      role,
+      permissions: { agent_history: role !== ROLE.USER },
+    })
+    const view = renderHook(() => useSidebarData())
+    expect(
+      view.result.current.navGroups.find((group) => group.id === 'agent')
+    ).toBeUndefined()
+    const adminGroup = view.result.current.navGroups.find(
+      (group) => group.id === 'admin'
+    )
+    expect(
+      adminGroup?.items.filter(
+        (item) => 'url' in item && item.url === '/agent-platform/finance'
+      )
+    ).toHaveLength(1)
+    view.unmount()
+  }
+  useAuthStore.getState().auth.setUser({
+    id: 2,
+    username: 'agent',
+    role: ROLE.USER,
+    permissions: { agent_history: true },
+  })
+  const view = renderHook(() => useSidebarData())
+  expect(
+    view.result.current.navGroups.find((group) => group.id === 'agent')?.items
+  ).toHaveLength(3)
+})
+
 function sidebarFor(admin?: object, user?: object, canConfigure = true) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -104,13 +138,7 @@ describe('security sidebar visibility', () => {
       result.current
         .find((group) => group.id === 'personal')
         ?.items.map((item) => item.title)
-    ).toEqual([
-      'Agent services & commissions',
-      'Wallet',
-      'Support Center',
-      'Profile',
-      'Security & Access',
-    ])
+    ).toEqual(['Wallet', 'Support Center', 'Profile', 'Security & Access'])
     expect(
       result.current
         .flatMap((group) => group.items)

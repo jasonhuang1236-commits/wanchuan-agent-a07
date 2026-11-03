@@ -69,14 +69,15 @@ export function SimpleCodeRecords(props: {
       }),
   })
   if (query.isPending) return <LoadingState />
-  if (query.isError)
-    {return (
+  if (query.isError) {
+    return (
       <ErrorState
         onRetry={() => {
           void query.refetch()
         }}
       />
-    )}
+    )
+  }
   return (
     <div className='space-y-3'>
       {!props.hideFilter && (
@@ -163,7 +164,7 @@ function SimpleCodeRecordRow(props: {
     !props.row.redeemed_at
   let status = t('Used')
   if (isExpired(props.row)) status = t('Expired')
-  else if (props.row.status === 1) status = t('Enabled')
+  else if (props.row.status === 1) status = t('Unused')
   else if (props.row.status === 2) status = t('Disabled')
   const cancel = async () => {
     if (!canCancel || busy) return
@@ -177,6 +178,7 @@ function SimpleCodeRecordRow(props: {
         version: props.row.version,
         reason: 'Agent cancelled an undelivered code',
       })
+      setCancelOpen(false)
       props.onChanged()
     } catch (error) {
       handleServerError(error)
@@ -240,7 +242,7 @@ function SimpleCodeRecordRow(props: {
             disabled={busy}
             onClick={() => setCancelOpen(true)}
           >
-            {t('Cancel')}
+            {t('Cancel code')}
           </Button>
         )}
       </div>

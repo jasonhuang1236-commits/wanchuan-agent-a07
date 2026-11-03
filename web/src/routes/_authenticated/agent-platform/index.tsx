@@ -19,14 +19,21 @@ For commercial licensing, please contact support@quantumnous.com
 import { createFileRoute, redirect } from '@tanstack/react-router'
 
 import { AgentPortal } from '@/features/agent-platform'
-import { hasAgentHistory } from '@/lib/agent-permissions'
+import { isAgentWorkspaceUser } from '@/lib/agent-permissions'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
 export const Route = createFileRoute('/_authenticated/agent-platform/')({
   beforeLoad: () => {
     const user = useAuthStore.getState().auth.user
-    if (!user || (!hasAgentHistory(user) && user.role < ROLE.ADMIN)) {
+    if (user?.role === ROLE.SUPER_ADMIN) {
+      throw redirect({
+        to: '/agent-platform/finance',
+        search: { section: 'agents' },
+        replace: true,
+      })
+    }
+    if (!isAgentWorkspaceUser(user)) {
       throw redirect({ to: '/403' })
     }
   },

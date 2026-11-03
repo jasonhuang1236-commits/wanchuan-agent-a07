@@ -41,7 +41,7 @@ import {
 import { useTranslation } from 'react-i18next'
 
 import type { SidebarBadges, SidebarData } from '@/components/layout/types'
-import { hasAgentHistory } from '@/lib/agent-permissions'
+import { isAgentWorkspaceUser } from '@/lib/agent-permissions'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -54,7 +54,7 @@ import { useAuthStore } from '@/stores/auth-store'
 export function useSidebarData(badges: SidebarBadges = {}): SidebarData {
   const { t } = useTranslation()
   const user = useAuthStore((state) => state.auth.user)
-  const agentGroups: SidebarData['navGroups'] = hasAgentHistory(user)
+  const agentGroups: SidebarData['navGroups'] = isAgentWorkspaceUser(user)
     ? [
         {
           id: 'agent',
@@ -193,7 +193,7 @@ export function useSidebarData(badges: SidebarBadges = {}): SidebarData {
             icon: Ticket,
           },
           {
-            title: t('Agent finance'),
+            title: t('Agent management'),
             url: '/agent-platform/finance',
             icon: Users,
             requiredRole: ROLE.SUPER_ADMIN,

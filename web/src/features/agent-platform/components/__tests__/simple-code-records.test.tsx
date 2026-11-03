@@ -17,7 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 
@@ -70,14 +76,21 @@ describe('simple redemption code records', () => {
     mount(<SimpleCodeRecords agentUserId={42} />)
 
     expect(await screen.findByText('ACTIVE-CODE-SECRET')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel code' }))
     expect(
       screen.getByText(/Only cancel if this code has not been given/)
     ).toBeInTheDocument()
     expect(api.request).not.toHaveBeenCalled()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel code' }))
+    fireEvent.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', {
+        name: 'Cancel code',
+      })
+    )
     await waitFor(() => expect(api.request).toHaveBeenCalledOnce())
+    await waitFor(() =>
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    )
     expect(vi.mocked(api.request).mock.calls[0][0]).toMatchObject({
       method: 'post',
       url: '/api/agent-platform/simple/codes/11/cancel',
@@ -105,7 +118,7 @@ describe('simple redemption code records', () => {
     expect(await screen.findByText('ACTIVE********SECRET')).toBeInTheDocument()
     expect(screen.queryByText('ACTIVE-CODE-SECRET')).not.toBeInTheDocument()
     expect(
-      screen.queryByRole('button', { name: 'Cancel' })
+      screen.queryByRole('button', { name: 'Cancel code' })
     ).not.toBeInTheDocument()
   })
 })
