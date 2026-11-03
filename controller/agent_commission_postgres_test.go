@@ -72,7 +72,24 @@ func setupCommissionHTTPPostgres(t *testing.T) commissionHTTPFixture {
 	facts, ok := model.NewAgentVerifiedPaymentFacts("stripe", "pi_http_fixture", "synthetic-http-merchant", "live", "USD", "10000", true)
 	require.True(t, ok)
 	require.NoError(t, model.Recharge(order.TradeNo, "synthetic-customer", "", facts))
-	_, err := model.ProcessAgentCommissionOutbox(context.Background(), 10)
+	// These handlers protect compatibility with pre-A07 cash liabilities. Seed
+	// an archived award explicitly; current payments must not generate one.
+	var event model.AgentCommissionOutbox
+	require.NoError(t, db.Where("kind = ? AND reference_id = ?", "payment", order.TradeNo).First(&event).Error)
+	var snapshot map[string]any
+	require.NoError(t, common.UnmarshalJsonStr(event.Payload, &snapshot))
+	snapshot["policy"] = policy
+	encoded, err := common.Marshal(snapshot)
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&event).Updates(map[string]any{"route": "cash", "payload": string(encoded)}).Error)
+	policySnapshot, err := common.Marshal(policy)
+	require.NoError(t, err)
+	account := model.AgentCommissionAccount{UserID: f.owner.Id, Currency: "USD", CurrencyExponent: 2, AvailableMinor: 400, ReservedMinor: 100, EarnedMinor: 500, Version: 1}
+	require.NoError(t, db.Create(&account).Error)
+	award := model.AgentCommissionAward{EventID: event.ID, UserID: f.owner.Id, SourceUserID: f.buyer.Id, ReferenceID: order.TradeNo, Provider: "stripe", PaymentReference: "pi_http_fixture", Currency: "USD", CurrencyExponent: 2, PaidMinor: 10000, RewardMinor: 500, AvailableMinor: 400, ReservedMinor: 100, RateBPS: 500, CapMinor: 3000, ReserveBPS: 2000, PolicyVersion: policy.ID, Qualification: "ordinary", PolicySnapshot: string(policySnapshot), MaturesAt: common.GetTimestamp(), Matured: true, Version: 1}
+	require.NoError(t, db.Create(&award).Error)
+	require.NoError(t, db.Create(&model.AgentCommissionLedger{OperationKey: "synthetic-historical-http-award", UserID: f.owner.Id, Currency: "USD", CurrencyExponent: 2, Kind: "historical_fixture", ReferenceType: "event", ReferenceID: fmt.Sprint(event.ID), DeltaAvailableMinor: 400, DeltaReservedMinor: 100, AfterAvailableMinor: 400, AfterReservedMinor: 100}).Error)
+	_, err = model.ProcessAgentCommissionOutbox(context.Background(), 10)
 	require.NoError(t, err)
 	_, err = model.MatureAgentCommissionAccounts(context.Background(), 10)
 	require.NoError(t, err)

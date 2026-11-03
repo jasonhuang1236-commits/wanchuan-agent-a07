@@ -35,6 +35,29 @@ func simpleAccountingPayment(t *testing.T, identity AuthSessionIdentity, referen
 	return order
 }
 
+func TestAgentSimpleRetiredCommissionEventsCannotGrantCashOrReferral(t *testing.T) {
+	_, agent := simpleAccountingFixture(t)
+	for _, route := range []string{"cash", "legacy"} {
+		snapshot := agentCommissionPaymentSnapshot{UserID: agentTestRecipientID, InviterID: agent.UserID, Eligible: true, PaidQuota: 500_000, PaidAt: common.GetTimestamp(), Qualification: "agent"}
+		payload, err := common.Marshal(snapshot)
+		require.NoError(t, err)
+		event := AgentCommissionOutbox{EventKey: "retired-" + route, Kind: "payment", ReferenceID: "retired-" + route, SourceUserID: agentTestRecipientID, Route: route, Payload: string(payload), Status: "pending"}
+		require.NoError(t, DB.Create(&event).Error)
+		for range 2 {
+			require.NoError(t, processAgentCommissionEvent(context.Background(), event.ID))
+		}
+		var inbox AgentCommissionInbox
+		require.NoError(t, DB.Where("event_id = ?", event.ID).First(&inbox).Error)
+		assert.Equal(t, "retired_"+route+"_event", inbox.Outcome)
+	}
+	var count int64
+	require.NoError(t, DB.Model(&AgentCommissionAward{}).Count(&count).Error)
+	assert.Zero(t, count)
+	require.NoError(t, DB.Model(&ReferralCommission{}).Count(&count).Error)
+	assert.Zero(t, count)
+	assert.Zero(t, getUserBalances(t, agent.UserID).AffQuota)
+}
+
 func TestAgentSimplePaymentCreationPersistsCompleteGatewayAndReplaysOriginal(t *testing.T) {
 	_, agent := simpleAccountingFixture(t)
 	request := AgentSimplePaymentRequest{RequestID: "a07-atomic-payment", Name: "Atomic payment", Quota: 500_000, SalePriceFen: 120, PaymentMethod: "alipay"}

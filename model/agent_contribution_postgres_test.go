@@ -15,7 +15,7 @@ func TestAgentContributionsVerifiedReceiptsRefundReplayCurrenciesPrivacyPostgres
 	f := setupAgentGovernancePostgres(t)
 	require.NoError(t, DB.Model(&User{}).Where("id = ?", f.buyer.Id).Update("display_name", "Invited synthetic customer").Error)
 	require.NoError(t, DB.Create(&AgentInvitation{UserId: f.buyer.Id, InviterId: f.inviter.Id, InviterUsername: f.inviter.Username, InviterRole: common.RoleCommonUser, Source: InvitationSourcePassword, BonusReason: "none"}).Error)
-	order := commissionPaidTopup(t, f, "contribution-live-usd", 10000)
+	order := commissionHistoricalPaidTopup(t, f, "contribution-live-usd", 10000)
 	facts, ok := NewAgentVerifiedPaymentFacts(PaymentProviderStripe, "pi_contribution-live-usd", "synthetic-merchant", "live", "USD", "10000", true)
 	require.True(t, ok)
 	require.NoError(t, Recharge(order.TradeNo, "synthetic-customer", "127.0.0.1", facts))

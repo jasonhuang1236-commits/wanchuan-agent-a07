@@ -80,7 +80,7 @@ func TestAgentPlatformRegisteredMigrationFreshPostgres(t *testing.T) {
 	assert.Zero(t, counts, "migration must never manufacture payment/reward events")
 }
 
-func TestAgentPlatformRegisteredMigrationPreservesLegacyLiabilitiesPostgres(t *testing.T) {
+func TestAgentPlatformRegisteredMigrationPreservesButRejectsLegacyLiabilitiesPostgres(t *testing.T) {
 	db := agentMigrationFixture(t)
 	user := model.User{Id: 4101, Username: "migration-agent", AffCode: "migration-agent", Role: common.RoleAgentUser, Status: common.UserStatusEnabled, AuthVersion: 7, Quota: 600, QuotaPaid: 100, QuotaBonus: 200, QuotaReward: 300, AffQuota: 80}
 	require.NoError(t, db.Create(&user).Error)
@@ -105,7 +105,7 @@ func TestAgentPlatformRegisteredMigrationPreservesLegacyLiabilitiesPostgres(t *t
 	require.NoError(t, reg.Freeze())
 	for range 2 {
 		require.NoError(t, db.AutoMigrate(reg.ModelsFor(extension.PhaseAfterCoreModels)...))
-		require.NoError(t, reg.RunStepsFor(db, extension.PhaseAfterCoreData))
+		require.ErrorContains(t, reg.RunStepsFor(db, extension.PhaseAfterCoreData), "existing agent financial history")
 	}
 	var stored model.User
 	require.NoError(t, db.First(&stored, user.Id).Error)
@@ -148,4 +148,6 @@ func TestAgentPlatformRegisteredMigrationPreservesLegacyLiabilitiesPostgres(t *t
 	assert.Zero(t, issues)
 	require.NoError(t, db.Model(&model.BalanceLedger{}).Count(&issues).Error)
 	assert.Zero(t, issues, "provenance migration does not add any money")
+	require.NoError(t, db.Model(&model.AgentSimpleMigration{}).Count(&issues).Error)
+	assert.Zero(t, issues, "A07 cannot mark the cutover complete while old liabilities require review")
 }

@@ -43,6 +43,7 @@ func MigrateAgentSimpleA07WithDB(db *gorm.DB) error {
 			{&AgentRedemptionAccount{}, "allocated_quota <> 0 OR available_quota <> 0 OR reserved_quota <> 0 OR spent_quota <> 0"},
 			{&AgentFundBatch{}, "original_quota <> 0"},
 			{&AgentCommissionAccount{}, "earned_minor <> 0 OR debt_minor <> 0 OR held_minor <> 0"},
+			{&AgentCommissionOutbox{}, "kind = 'payment' AND route IN ('legacy', 'cash') AND status <> 'done'"},
 			{&AgentSimpleLedger{}, "id > 0"},
 		} {
 			var count int64

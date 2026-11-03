@@ -153,6 +153,7 @@ func processAgentCommissionEvent(ctx context.Context, id int64) error {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
+		err = nil
 		outcome := "ignored"
 		switch event.Kind {
 		case "payment":

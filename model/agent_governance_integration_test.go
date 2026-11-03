@@ -207,7 +207,7 @@ func TestAgentGovernanceCommissionWalletAndProcurementShareGrossTransferCapPostg
 		_, err := UpdateAgentProfileTx(tx, f.rootIdentity, f.inviter.Id, AgentProfileMutation{Status: AgentProfileActive, Reason: "Separate approved activation"})
 		return err
 	}))
-	commissionPaidTopup(t, f, "governance-conversion-principal", 10000)
+	commissionHistoricalPaidTopup(t, f, "governance-conversion-principal", 10000)
 	commissionDrain(t)
 	before := getUserBalances(t, f.inviter.Id)
 	for i, input := range []AgentCommissionQuoteRequest{{RequestID: "governance-wallet-conversion", Target: "wallet", Currency: "USD", AmountMinor: 20}, {RequestID: "governance-procurement-conversion", Target: "procurement", Currency: "USD", AmountMinor: 10}, {RequestID: "governance-conversion-over-cap", Target: "wallet", Currency: "USD", AmountMinor: 1}} {

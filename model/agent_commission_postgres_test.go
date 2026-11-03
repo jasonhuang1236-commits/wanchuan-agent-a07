@@ -49,7 +49,7 @@ func setupAgentCommissionPostgres(t *testing.T) commissionFixture {
 	return commissionFixture{root: root, inviter: inviter, buyer: buyer, rootIdentity: rootIdentity, identity: identity, policy: policy}
 }
 
-func commissionPaidTopup(t *testing.T, f commissionFixture, key string, paid int64) TopUp {
+func commissionHistoricalPaidTopup(t *testing.T, f commissionFixture, key string, paid int64) TopUp {
 	t.Helper()
 	order := TopUp{UserId: f.buyer.Id, TradeNo: key, Amount: 200, Money: 200, PaymentProvider: PaymentProviderStripe, PaymentMethod: PaymentMethodStripe, Status: common.TopUpStatusPending, CreateTime: common.GetTimestamp()}
 	require.NoError(t, DB.Create(&order).Error)
@@ -57,6 +57,32 @@ func commissionPaidTopup(t *testing.T, f commissionFixture, key string, paid int
 	require.True(t, ok)
 	require.NoError(t, Recharge(key, "synthetic-customer", "127.0.0.1", facts))
 	require.NoError(t, DB.First(&order, order.Id).Error)
+	// Restore a pre-A07 cash entitlement, not a new production payment route.
+	// The current worker must only acknowledge this historical event on replay.
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+		var event AgentCommissionOutbox
+		if err := lockForUpdate(tx).Where("kind = ? AND reference_id = ?", "payment", key).First(&event).Error; err != nil {
+			return err
+		}
+		var snapshot agentCommissionPaymentSnapshot
+		if err := common.UnmarshalJsonStr(event.Payload, &snapshot); err != nil {
+			return err
+		}
+		policy, err := ReadCurrentAgentPolicyTx(tx)
+		if err != nil {
+			return err
+		}
+		snapshot.Policy = *policy
+		payload, err := common.Marshal(snapshot)
+		if err != nil {
+			return err
+		}
+		if err := tx.Model(&event).Updates(map[string]any{"route": "cash", "payload": string(payload)}).Error; err != nil {
+			return err
+		}
+		_, err = recordAgentCashCommissionTx(tx, &event, snapshot)
+		return err
+	}))
 	return order
 }
 
@@ -103,9 +129,9 @@ func commissionRefund(t *testing.T, f commissionFixture, order TopUp, reference 
 
 func TestAgentCommissionPrincipalOutboxAtomicAndLegacyFailureRecoveryPostgres(t *testing.T) {
 	f := setupAgentCommissionPostgres(t)
-	// No verified receipt means the pre-cutover consumption reward, not a
-	// speculative cash entitlement. A broken inviter is isolated by the outbox.
-	require.NoError(t, DB.Model(&User{}).Where("id = ?", f.inviter.Id).Update("aff_quota", -9).Error)
+	// A07 permits negative recovery balances; an out-of-range balance remains
+	// invalid and must fail the worker without rolling back paid principal.
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", f.inviter.Id).Update("aff_quota", -common.MaxWalletQuota-1).Error)
 	order := TopUp{UserId: f.buyer.Id, TradeNo: "legacy-isolation", Amount: 2, Money: 2, PaymentProvider: PaymentProviderEpay, PaymentMethod: "alipay", Status: common.TopUpStatusPending}
 	require.NoError(t, DB.Create(&order).Error)
 	require.NoError(t, DB.Exec(`CREATE FUNCTION commission_fail_outbox() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic durable event failure'; END $$`).Error)
@@ -137,7 +163,7 @@ func TestAgentCommissionPrincipalOutboxAtomicAndLegacyFailureRecoveryPostgres(t 
 	require.NoError(t, err)
 	commissionDrain(t)
 	commissionDrain(t)
-	assert.Equal(t, principal/20, getUserBalances(t, f.inviter.Id).AffQuota)
+	assert.Equal(t, principal*3/100, getUserBalances(t, f.inviter.Id).AffQuota)
 	var rewards int64
 	require.NoError(t, DB.Model(&ReferralCommission{}).Count(&rewards).Error)
 	assert.EqualValues(t, 1, rewards)
@@ -148,10 +174,10 @@ func TestAgentCommissionPrincipalOutboxAtomicAndLegacyFailureRecoveryPostgres(t 
 
 func TestAgentCommissionRealPaidSnapshotConcurrentCapAndNoDoubleRewardPostgres(t *testing.T) {
 	f := setupAgentCommissionPostgres(t)
-	first := commissionPaidTopup(t, f, "cap-a", 40000)
-	second := commissionPaidTopup(t, f, "cap-b", 40000)
-	// Consumer must use the captured version even after an administrative rate
-	// change, and profile toggles cannot change the lifetime cap key.
+	first := commissionHistoricalPaidTopup(t, f, "cap-a", 40000)
+	second := commissionHistoricalPaidTopup(t, f, "cap-b", 40000)
+	// Archived awards retain their captured policy and cap after policy changes;
+	// concurrent A07 worker replays must not regrant a retired cash entitlement.
 	changed := f.policy
 	changed.ID = 0
 	changed.RequestID = "later-policy"
@@ -188,7 +214,7 @@ func TestAgentCommissionRealPaidSnapshotConcurrentCapAndNoDoubleRewardPostgres(t
 	require.NoError(t, DB.Model(&ReferralCommission{}).Count(&legacy).Error)
 	assert.Zero(t, legacy)
 	require.NoError(t, DB.Create(&AgentProfile{UserID: f.inviter.Id, Status: AgentProfileExited, Version: 8}).Error)
-	commissionPaidTopup(t, f, "cap-c", 40000)
+	commissionHistoricalPaidTopup(t, f, "cap-c", 40000)
 	commissionDrain(t)
 	assert.EqualValues(t, 3000, commissionAccount(t, f).EarnedMinor)
 	// Reusing one actual provider payment for a second local order is rejected.
@@ -203,7 +229,7 @@ func TestAgentCommissionRealPaidSnapshotConcurrentCapAndNoDoubleRewardPostgres(t
 
 func TestAgentCommissionConversionReservePartialRefundDebtAndReplayPostgres(t *testing.T) {
 	f := setupAgentCommissionPostgres(t)
-	order := commissionPaidTopup(t, f, "convert-original", 10000)
+	order := commissionHistoricalPaidTopup(t, f, "convert-original", 10000)
 	commissionDrain(t)
 	a := commissionAccount(t, f)
 	assert.EqualValues(t, 500, a.EarnedMinor)
@@ -264,7 +290,7 @@ func TestAgentCommissionUnknownWithdrawalFreezeRefundAndFailureRecoveryPostgres(
 	for _, outcome := range []string{"failed", "succeeded"} {
 		t.Run(outcome, func(t *testing.T) {
 			f := setupAgentCommissionPostgres(t)
-			order := commissionPaidTopup(t, f, "withdraw-original", 10000)
+			order := commissionHistoricalPaidTopup(t, f, "withdraw-original", 10000)
 			commissionDrain(t)
 			recipient := commissionRecipient(t, f)
 			q, err := CreateAgentCommissionQuote(f.identity, AgentCommissionQuoteRequest{RequestID: "withdraw-request", Target: "withdrawal", Currency: "USD", AmountMinor: 300, RecipientID: recipient.ID, RecipientVersion: recipient.Version})
@@ -351,7 +377,7 @@ func mustCommissionJSON(t *testing.T, value any) []byte {
 
 func TestAgentCommissionRefundBeforePaymentProcessingAndRecipientChangePostgres(t *testing.T) {
 	f := setupAgentCommissionPostgres(t)
-	order := commissionPaidTopup(t, f, "out-of-order-original", 10000)
+	order := commissionHistoricalPaidTopup(t, f, "out-of-order-original", 10000)
 	commissionRefund(t, f, order, "early-refund", 5000)
 	var refund AgentCommissionOutbox
 	require.NoError(t, DB.Where("kind = ?", "refund").First(&refund).Error)
@@ -391,7 +417,7 @@ func TestAgentCommissionMaturityAndTestPaymentsRemainNonCashPostgres(t *testing.
 	later.CommissionMaturitySeconds = 86400
 	require.NoError(t, DB.Create(&later).Error)
 	require.NoError(t, DB.Model(&AgentPolicyState{}).Where("id = 1").Update("current_policy_id", later.ID).Error)
-	commissionPaidTopup(t, f, "not-mature", 10000)
+	commissionHistoricalPaidTopup(t, f, "not-mature", 10000)
 	commissionDrain(t)
 	a := commissionAccount(t, f)
 	assert.EqualValues(t, 500, a.PendingMinor)
@@ -417,7 +443,7 @@ func TestAgentCommissionMaturityAndTestPaymentsRemainNonCashPostgres(t *testing.
 
 func TestAgentCommissionProcurementConversionNoDiscountNoCashRefundAndStaleProfilePostgres(t *testing.T) {
 	f := setupAgentCommissionPostgres(t)
-	order := commissionPaidTopup(t, f, "procurement-original", 10000)
+	order := commissionHistoricalPaidTopup(t, f, "procurement-original", 10000)
 	commissionDrain(t)
 	require.NoError(t, DB.Create(&AgentProfile{UserID: f.inviter.Id, Status: AgentProfileActive, Version: 1}).Error)
 	input := AgentCommissionQuoteRequest{RequestID: "commission-procurement", Target: "procurement", Currency: "USD", AmountMinor: 200}
@@ -461,7 +487,7 @@ func TestAgentCommissionProcurementConversionNoDiscountNoCashRefundAndStaleProfi
 
 func TestAgentCommissionDistinctConcurrentSpendsCannotOverdrawAndProofRollbackPostgres(t *testing.T) {
 	f := setupAgentCommissionPostgres(t)
-	commissionPaidTopup(t, f, "concurrent-spend-original", 10000)
+	commissionHistoricalPaidTopup(t, f, "concurrent-spend-original", 10000)
 	commissionDrain(t)
 	type spend struct {
 		input AgentCommissionExecuteRequest
@@ -524,7 +550,7 @@ func TestAgentCommissionDistinctConcurrentSpendsCannotOverdrawAndProofRollbackPo
 
 func TestAgentCommissionReserveReleaseRootOnlyAndOldAffConsumptionUnderFreezePostgres(t *testing.T) {
 	f := setupAgentCommissionPostgres(t)
-	commissionPaidTopup(t, f, "reserve-original", 10000)
+	commissionHistoricalPaidTopup(t, f, "reserve-original", 10000)
 	commissionDrain(t)
 	input := AgentCommissionReserveRequest{RequestID: "release-risk-reserve", UserID: f.inviter.Id, Currency: "USD", AmountMinor: 100, Reason: "Independent risk review complete"}
 	_, err := PrepareAgentCommissionOperation(f.identity, "commission.reserve.release", input.RequestID, mustCommissionJSON(t, input))
@@ -557,7 +583,7 @@ func TestAgentCommissionReserveReleaseRootOnlyAndOldAffConsumptionUnderFreezePos
 	require.NoError(t, err)
 	after := getUserBalances(t, f.inviter.Id)
 	assert.Equal(t, before.AffQuota-20, after.AffQuota)
-	assert.Equal(t, before.QuotaReward+20, after.QuotaReward)
+	assert.Equal(t, before.QuotaPaid+20, after.QuotaPaid)
 	recovery, err := FindAgentCommissionOperation(f.identity, legacy.RequestID)
 	require.NoError(t, err)
 	require.NotNil(t, recovery)
@@ -585,7 +611,7 @@ func TestAgentCommissionVerifiedProviderRefundBeforePaymentReplayAndCumulativePo
 	auth := commissionProof(t, f.rootIdentity, "commission.outbox.retry", retry.RequestID, retry)
 	_, err = RetryAgentCommissionOutbox(auth, retry)
 	require.NoError(t, err, "root can safely schedule an unmapped immutable event without inventing an owner")
-	commissionPaidTopup(t, f, "provider-late", 10000)
+	commissionHistoricalPaidTopup(t, f, "provider-late", 10000)
 	require.NoError(t, processAgentCommissionEvent(context.Background(), event.ID))
 	commissionDrain(t)
 	assert.EqualValues(t, 250, commissionAccount(t, f).ReversedMinor)
@@ -614,7 +640,7 @@ func TestAgentCommissionVerifiedProviderRefundBeforePaymentReplayAndCumulativePo
 
 func TestAgentCommissionNewMaturityAndReleasedReserveRepayDebtWithoutRegrantPostgres(t *testing.T) {
 	f := setupAgentCommissionPostgres(t)
-	original := commissionPaidTopup(t, f, "debt-original", 10000)
+	original := commissionHistoricalPaidTopup(t, f, "debt-original", 10000)
 	commissionDrain(t)
 	quote, err := CreateAgentCommissionQuote(f.identity, AgentCommissionQuoteRequest{RequestID: "debt-wallet-transfer", Target: "wallet", Currency: "USD", AmountMinor: 400})
 	require.NoError(t, err)
@@ -625,7 +651,7 @@ func TestAgentCommissionNewMaturityAndReleasedReserveRepayDebtWithoutRegrantPost
 	commissionRefund(t, f, original, "original-chargeback", 10000)
 	commissionDrain(t)
 	assert.EqualValues(t, 400, commissionAccount(t, f).DebtMinor)
-	replacement := commissionPaidTopup(t, f, "replacement-award", 5000)
+	replacement := commissionHistoricalPaidTopup(t, f, "replacement-award", 5000)
 	commissionDrain(t)
 	a := commissionAccount(t, f)
 	assert.EqualValues(t, 200, a.DebtMinor)
@@ -659,7 +685,7 @@ func TestAgentCommissionNewMaturityAndReleasedReserveRepayDebtWithoutRegrantPost
 
 func TestAgentCommissionPrivilegedRecoveryRejectsCurrentRoleDowngradePostgres(t *testing.T) {
 	f := setupAgentCommissionPostgres(t)
-	order := commissionPaidTopup(t, f, "recovery-original", 10000)
+	order := commissionHistoricalPaidTopup(t, f, "recovery-original", 10000)
 	commissionDrain(t)
 	input := AgentCommissionReserveRequest{RequestID: "privileged-recovery", UserID: f.inviter.Id, Currency: "USD", AmountMinor: 100, Reason: "Synthetic reviewed release"}
 	auth := commissionProof(t, f.rootIdentity, "commission.reserve.release", input.RequestID, input)
@@ -723,7 +749,7 @@ func TestAgentCommissionPreparationRejectsUnknownContradictoryAndTrailingFieldsP
 
 func TestAgentCommissionManualInstructionsRequireApprovedSubmittedIndependentLiveFinancePostgres(t *testing.T) {
 	f := setupAgentCommissionPostgres(t)
-	commissionPaidTopup(t, f, "manual-instructions-payment", 10000)
+	commissionHistoricalPaidTopup(t, f, "manual-instructions-payment", 10000)
 	commissionDrain(t)
 	recipient := commissionRecipient(t, f)
 	quote, err := CreateAgentCommissionQuote(f.identity, AgentCommissionQuoteRequest{RequestID: "manual-instructions-withdraw", Target: "withdrawal", Currency: "USD", AmountMinor: 300, RecipientID: recipient.ID, RecipientVersion: recipient.Version})

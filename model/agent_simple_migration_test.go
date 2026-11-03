@@ -44,3 +44,20 @@ func TestAgentSimpleMigrationRejectsExistingAgentFundsWithoutPartialTransfers(t 
 	require.Error(t, MigrateAgentSimpleA07WithDB(DB), "wallet ceiling failure must roll back the migration")
 	assert.Equal(t, 500_000, getUserBalances(t, 9811).AffQuota)
 }
+
+func TestAgentSimpleMigrationRequiresReviewOfPendingRetiredEntitlements(t *testing.T) {
+	for _, route := range []string{"legacy", "cash"} {
+		t.Run(route, func(t *testing.T) {
+			setupLedgerTestState(t)
+			seedAffQuotaUser(t, 9821, 500_000, 500_000)
+			event := AgentCommissionOutbox{EventKey: "migration-pending-" + route, Kind: "payment", ReferenceID: "migration-pending-" + route, SourceUserID: 9821, Route: route, Payload: "{}", Status: "pending"}
+			require.NoError(t, DB.Create(&event).Error)
+			require.Error(t, MigrateAgentSimpleA07WithDB(DB))
+			assert.EqualValues(t, 500_000, getUserBalances(t, 9821).AffQuota)
+			assert.Zero(t, getUserBalances(t, 9821).QuotaPaid)
+			var count int64
+			require.NoError(t, DB.Model(&AgentSimpleMigration{}).Count(&count).Error)
+			assert.Zero(t, count)
+		})
+	}
+}
