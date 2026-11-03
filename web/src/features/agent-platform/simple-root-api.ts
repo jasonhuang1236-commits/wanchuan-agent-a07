@@ -116,6 +116,7 @@ export function settleSimpleExit(payload: {
   request_id: string
   agent_user_id: number
   quota: number
+  settle_all?: boolean
   source: string
   target: string
   reason: string

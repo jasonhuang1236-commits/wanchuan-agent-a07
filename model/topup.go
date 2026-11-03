@@ -13,26 +13,27 @@ import (
 )
 
 type TopUp struct {
-	AgentSimpleTopUp      bool    `json:"agent_simple_topup,omitempty" gorm:"not null;default:false;index"`
-	AgentSimpleKind       string  `json:"agent_simple_kind,omitempty" gorm:"type:varchar(16);not null;default:''"`
-	AgentSimpleQuota      int64   `json:"agent_simple_quota,omitempty" gorm:"type:bigint;not null;default:0"`
-	PaymentReceiptID      int64   `json:"payment_receipt_id"`
-	PaidProviderReference string  `json:"-" gorm:"type:varchar(255)"`
-	PaidMerchantScope     string  `json:"-" gorm:"type:varchar(128)"`
-	PaidEnvironment       string  `json:"-" gorm:"type:varchar(16)"`
-	PaidCurrency          string  `json:"paid_currency" gorm:"type:varchar(3)"`
-	PaidCurrencyExponent  int     `json:"paid_currency_exponent"`
-	PaidAmountMinor       int64   `json:"paid_amount_minor,string"`
-	Id                    int     `json:"id"`
-	UserId                int     `json:"user_id" gorm:"index"`
-	Amount                int64   `json:"amount"`
-	Money                 float64 `json:"money"`
-	TradeNo               string  `json:"trade_no" gorm:"unique;type:varchar(255);index"`
-	PaymentMethod         string  `json:"payment_method" gorm:"type:varchar(50)"`
-	PaymentProvider       string  `json:"payment_provider" gorm:"type:varchar(50);default:''"`
-	CreateTime            int64   `json:"create_time"`
-	CompleteTime          int64   `json:"complete_time"`
-	Status                string  `json:"status"`
+	AgentSimpleTopUp         bool    `json:"agent_simple_topup,omitempty" gorm:"not null;default:false;index"`
+	AgentSimpleKind          string  `json:"agent_simple_kind,omitempty" gorm:"type:varchar(16);not null;default:''"`
+	AgentSimpleQuota         int64   `json:"agent_simple_quota,omitempty" gorm:"type:bigint;not null;default:0"`
+	AgentSimpleDeferredQuota int64   `json:"agent_simple_deferred_quota,omitempty" gorm:"type:bigint;not null;default:0"`
+	PaymentReceiptID         int64   `json:"payment_receipt_id"`
+	PaidProviderReference    string  `json:"-" gorm:"type:varchar(255)"`
+	PaidMerchantScope        string  `json:"-" gorm:"type:varchar(128)"`
+	PaidEnvironment          string  `json:"-" gorm:"type:varchar(16)"`
+	PaidCurrency             string  `json:"paid_currency" gorm:"type:varchar(3)"`
+	PaidCurrencyExponent     int     `json:"paid_currency_exponent"`
+	PaidAmountMinor          int64   `json:"paid_amount_minor,string"`
+	Id                       int     `json:"id"`
+	UserId                   int     `json:"user_id" gorm:"index"`
+	Amount                   int64   `json:"amount"`
+	Money                    float64 `json:"money"`
+	TradeNo                  string  `json:"trade_no" gorm:"unique;type:varchar(255);index"`
+	PaymentMethod            string  `json:"payment_method" gorm:"type:varchar(50)"`
+	PaymentProvider          string  `json:"payment_provider" gorm:"type:varchar(50);default:''"`
+	CreateTime               int64   `json:"create_time"`
+	CompleteTime             int64   `json:"complete_time"`
+	Status                   string  `json:"status"`
 }
 
 const (
@@ -589,6 +590,9 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 
 		if topUp.Status != common.TopUpStatusPending {
 			return common.NewMessage("Order is not pending payment and cannot be completed")
+		}
+		if topUp.AgentSimpleTopUp {
+			return ErrAgentPaymentReceiptConflict
 		}
 
 		// 计算应充值额度：

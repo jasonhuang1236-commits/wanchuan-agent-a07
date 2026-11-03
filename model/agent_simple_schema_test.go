@@ -84,6 +84,7 @@ func TestAgentSimpleSchemaFreshUpgradeAndRepeatedMigration(t *testing.T) {
 				assert.Equal(t, common.TopUpStatusSuccess, payment.Status)
 				assert.EqualValues(t, 1_000_000, payment.PaidAmountMinor)
 				assert.False(t, payment.AgentSimpleTopUp)
+				assert.Zero(t, payment.AgentSimpleDeferredQuota)
 				payment.Id = 0
 				require.Error(t, DB.Create(&payment).Error, "upgrade preserves payment trade uniqueness")
 			}

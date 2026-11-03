@@ -23,6 +23,7 @@ func StartRuntimeWorkers(workers *lifecycle.Group) {
 	startAccountingWorker(workers, "agent-simple-payment-maturity", time.Minute, model.MatureAgentSimplePaymentProfits)
 	startAccountingWorker(workers, "agent-simple-payment-expiry", time.Minute, model.ExpireAgentSimplePaymentOrders)
 	startAccountingWorker(workers, "agent-simple-weekly-settlement", time.Minute, model.RunAgentSimpleWeeklySettlement)
+	startAccountingWorker(workers, "agent-simple-deferred-cash", time.Minute, model.DrainAgentSimpleDeferredCash)
 	startAccountingWorker(workers, "agent-campaign-maintenance", time.Minute, func(ctx context.Context, limit int) (int, error) {
 		report, err := model.RunAgentCampaignMaintenance(ctx, limit)
 		return report.ExpiredLots + report.ExpiredClaims, err

@@ -137,6 +137,10 @@ function HistoryRow(props: {
     )
   } else if (props.kind === 'recharges') {
     amount('agent_simple_quota', 'Quota')
+    amount(
+      'agent_simple_deferred_quota',
+      'Paid credit awaiting balance capacity'
+    )
     details.push(
       [t('Paid amount'), `¥${number('money').toFixed(2)}`],
       [t('Status'), t(String(row.status ?? ''))],

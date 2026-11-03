@@ -63,14 +63,12 @@ test('root can record an ordinary user withdrawal even when there are no agent a
 })
 
 test('root sees the precise debt and can record a one-fen payment to settle it', async () => {
-  useSystemConfigStore
-    .getState()
-    .setConfig({
-      currency: {
-        ...useSystemConfigStore.getState().config.currency,
-        quotaPerUnit: 500_000,
-      },
-    })
+  useSystemConfigStore.getState().setConfig({
+    currency: {
+      ...useSystemConfigStore.getState().config.currency,
+      quotaPerUnit: 500_000,
+    },
+  })
   vi.spyOn(api, 'get').mockResolvedValue({
     data: {
       success: true,
@@ -119,5 +117,68 @@ test('root sees the precise debt and can record a one-fen payment to settle it',
   expect(request.mock.calls[0][0]).toMatchObject({
     url: '/api/agent-platform/simple/finance/repayment',
     data: { agent_user_id: 73, quota: 5000 },
+  })
+})
+
+test('root can settle an entire fractional balance without rounding it through text input', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        items: [
+          {
+            agent_user_id: 73,
+            username: 'Andy',
+            status: 'paused',
+            available_quota: 555,
+            available_credit_quota: 0,
+            amount_due_quota: 0,
+          },
+        ],
+        total: 1,
+      },
+    },
+  })
+  const request = vi
+    .spyOn(api, 'request')
+    .mockResolvedValue({ data: { success: true, data: {} } })
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <SimpleAgentFinance />
+    </QueryClientProvider>
+  )
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Settle remaining balance' })
+  )
+  fireEvent.click(
+    screen.getByRole('checkbox', { name: 'Settle all available balance' })
+  )
+  for (const [name, value] of [
+    ['Reason', 'Exact fractional settlement'],
+    ['Support evidence', 'Synthetic support reference'],
+  ]) {
+    fireEvent.change(screen.getByRole('textbox', { name }), {
+      target: { value },
+    })
+  }
+  fireEvent.click(
+    screen.getByRole('checkbox', {
+      name: 'I confirm this change and its financial impact',
+    })
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(request).toHaveBeenCalledOnce())
+  expect(request.mock.calls[0][0]).toMatchObject({
+    url: '/api/agent-platform/simple/finance/exit',
+    data: {
+      agent_user_id: 73,
+      quota: 0,
+      settle_all: true,
+      source: 'cash',
+      target: 'wallet',
+    },
   })
 })

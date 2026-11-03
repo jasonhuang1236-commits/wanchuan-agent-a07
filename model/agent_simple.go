@@ -1690,16 +1690,24 @@ func creditAgentSimpleCashTx(tx *gorm.DB, agentID, actorID int, quota, paidQuota
 	if err := applyAgentSimpleRepaymentTx(tx, account, repayment); err != nil {
 		return err
 	}
-	var remaining int64
-	if kind == "repayment" {
-		remaining, err = AgentMoneyRatio(paidQuota-repayment, 10, 9, false)
-	} else {
-		remaining, err = AgentMoneyRatio(quota, paidQuota-repayment, paidQuota, false)
+	remaining, err := agentSimpleCashRemainder(quota, paidQuota, repayment, kind)
+	if err != nil {
+		return err
 	}
-	if err != nil || simpleAvailableQuota(account) > int64(common.MaxWalletQuota)-remaining {
-		return ErrWalletQuotaLimitExceeded
+	credited := min(remaining, int64(common.MaxWalletQuota)-simpleAvailableQuota(account))
+	if credited < 0 {
+		return ErrAgentSimpleInvariant
 	}
-	account.CashQuota += remaining
+	account.CashQuota += credited
+	if remaining > credited {
+		result := tx.Model(&TopUp{}).Where("trade_no = ? AND user_id = ? AND agent_simple_top_up = ? AND status = ?", referenceID, agentID, true, common.TopUpStatusSuccess).Update("agent_simple_deferred_quota", remaining-credited)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrAgentSimpleInvariant
+		}
+	}
 	account.LastActivityAt = common.GetTimestamp()
 	ledgerKind := "cash_recharge"
 	if kind == "repayment" {

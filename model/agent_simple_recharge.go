@@ -1,12 +1,24 @@
 package model
 
 import (
+	"context"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
+
+func agentSimpleCashRemainder(quota, paidQuota, repayment int64, kind string) (int64, error) {
+	if repayment < 0 || repayment > paidQuota {
+		return 0, ErrAgentSimpleInvariant
+	}
+	if kind == "repayment" {
+		return AgentMoneyRatio(paidQuota-repayment, 10, 9, false)
+	}
+	return AgentMoneyRatio(quota, paidQuota-repayment, paidQuota, false)
+}
 
 type AgentSimpleRechargeRequest struct {
 	RequestID     string `json:"request_id"`
@@ -108,15 +120,22 @@ func CreateAgentSimpleRecharge(identity AuthSessionIdentity, request AgentSimple
 		if account.Status == AgentSimpleStatusCancelled {
 			return ErrAgentSimpleUnavailable
 		}
+		paidQuota, err := common.WalletQuotaFromDecimalStrict(decimal.NewFromInt(quote.PayFen).Div(decimal.NewFromInt(100)).Mul(decimal.NewFromFloat(common.QuotaPerUnit)))
+		if err != nil || paidQuota <= 0 {
+			return ErrAgentSimpleInvalid
+		}
 		if request.Kind == "recharge" {
 			if err := requireAgentSimpleSalesTx(tx, identity, identity.UserID); err != nil {
 				return err
 			}
 		} else {
-			paidQuota, err := common.WalletQuotaFromDecimalStrict(decimal.NewFromInt(quote.PayFen).Div(decimal.NewFromInt(100)).Mul(decimal.NewFromFloat(common.QuotaPerUnit)))
-			if err != nil || validateAgentSimpleRepayment(account.CreditOutstandingQuota, int64(paidQuota)) != nil {
+			if validateAgentSimpleRepayment(account.CreditOutstandingQuota, int64(paidQuota)) != nil {
 				return ErrAgentSimpleInvalid
 			}
+		}
+		remaining, err := agentSimpleCashRemainder(quote.Quota, int64(paidQuota), min(account.CreditOutstandingQuota, int64(paidQuota)), request.Kind)
+		if err != nil || remaining > int64(common.MaxWalletQuota)-simpleAvailableQuota(account) {
+			return ErrWalletQuotaLimitExceeded
 		}
 		order := TopUp{AgentSimpleTopUp: true, AgentSimpleKind: request.Kind, AgentSimpleQuota: quote.Quota, UserId: actor.Id, Amount: decimal.NewFromInt(quote.Quota).Div(decimal.NewFromFloat(common.QuotaPerUnit)).IntPart(), Money: decimal.NewFromInt(quote.PayFen).Div(decimal.NewFromInt(100)).InexactFloat64(), TradeNo: tradeNo, PaymentMethod: request.PaymentMethod, PaymentProvider: PaymentProviderEpay, CreateTime: common.GetTimestamp(), Status: common.TopUpStatusPending}
 		if err := tx.Create(&order).Error; err != nil {
@@ -130,4 +149,54 @@ func CreateAgentSimpleRecharge(identity AuthSessionIdentity, request AgentSimple
 		return tx.Model(operation).Update("result", string(encoded)).Error
 	})
 	return &result, err
+}
+
+// DrainAgentSimpleDeferredCash completes previously paid credits after space is
+// available. Each order and its account stay locked until both records commit.
+func DrainAgentSimpleDeferredCash(ctx context.Context, limit int) (int, error) {
+	limit = min(max(limit, 1), 200)
+	var ids []int
+	if err := DB.WithContext(ctx).Table("top_ups AS p").Select("p.id").Joins("JOIN agent_simple_accounts a ON a.agent_user_id = p.user_id").Where("p.agent_simple_top_up = ? AND p.status = ? AND p.payment_receipt_id > 0 AND p.agent_simple_deferred_quota > 0", true, common.TopUpStatusSuccess).Where("a.cash_quota + a.reward_quota + a.root_quota + a.payment_quota < ?", common.MaxWalletQuota).Order("p.id").Limit(limit).Scan(&ids).Error; err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, id := range ids {
+		err := DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var order TopUp
+			if err := lockForUpdate(tx).First(&order, id).Error; err != nil {
+				return err
+			}
+			if !order.AgentSimpleTopUp || order.Status != common.TopUpStatusSuccess || order.PaymentReceiptID <= 0 || order.AgentSimpleDeferredQuota <= 0 {
+				return nil
+			}
+			if order.AgentSimpleDeferredQuota > int64(common.MaxWalletQuota) {
+				return ErrAgentSimpleInvariant
+			}
+			account, err := lockAgentSimpleAccountTx(tx, order.UserId, false)
+			if err != nil {
+				return err
+			}
+			credited := min(order.AgentSimpleDeferredQuota, int64(common.MaxWalletQuota)-simpleAvailableQuota(account))
+			if credited < 0 {
+				return ErrAgentSimpleInvariant
+			}
+			if credited == 0 {
+				return nil
+			}
+			before := *account
+			account.CashQuota += credited
+			if err := saveAgentSimpleAccountTx(tx, before, account, 0, "cash_deferred_release", "topup", order.TradeNo, "Complete a previously paid agent balance credit", "deferred:"+strconv.Itoa(order.Id)); err != nil {
+				return err
+			}
+			if err := tx.Model(&order).Update("agent_simple_deferred_quota", order.AgentSimpleDeferredQuota-credited).Error; err != nil {
+				return err
+			}
+			count++
+			return nil
+		})
+		if err != nil {
+			return count, err
+		}
+	}
+	return count, nil
 }

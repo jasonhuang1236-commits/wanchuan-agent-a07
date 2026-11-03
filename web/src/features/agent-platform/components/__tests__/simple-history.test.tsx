@@ -92,6 +92,35 @@ test('history shows funding sources with actor and reason and switches to separa
   )
 })
 
+test('paid credits waiting for account capacity remain visible in recharge records', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        items: [
+          {
+            id: 7,
+            agent_simple_quota: 500_000,
+            agent_simple_deferred_quota: 250_000,
+            money: 0.9,
+            status: 'success',
+            payment_method: 'alipay',
+          },
+        ],
+        total: 1,
+      },
+    },
+  })
+  mount()
+  fireEvent.change(screen.getByRole('combobox', { name: 'History type' }), {
+    target: { value: 'recharges' },
+  })
+  expect(
+    await screen.findByText('Paid credit awaiting balance capacity')
+  ).toBeVisible()
+  expect(screen.getByText('$0.5')).toBeVisible()
+})
+
 test('weekly bill and daily reminder history show real due and reminder dates', async () => {
   vi.spyOn(api, 'get').mockImplementation(async (url) => {
     let items: Record<string, string | number>[] = []

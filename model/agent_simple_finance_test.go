@@ -323,3 +323,21 @@ func TestAgentSimpleCashExitRecordsDiscountFeeAndFenRoundingExactlyOnce(t *testi
 		})
 	}
 }
+
+func TestAgentSimpleExitSettleAllPreservesSubCentQuota(t *testing.T) {
+	root, agent := simpleAccountingFixture(t)
+	_, err := SetAgentSimpleStatus(root, AgentSimpleStatusRequest{RequestID: "a07-exit-all-pause", AgentUserID: agent.UserID, Status: AgentSimpleStatusPaused, Reason: "Synthetic exit preparation"})
+	require.NoError(t, err)
+	require.NoError(t, DB.Model(&AgentSimpleAccount{}).Where("agent_user_id = ?", agent.UserID).Update("cash_quota", 555).Error)
+	record, err := SettleAgentSimpleExit(root, AgentSimpleExitRequest{RequestID: "a07-exit-all-wallet", AgentUserID: agent.UserID, Source: "cash", Target: "wallet", SettleAll: true, Reason: "Settle exact remaining balance", Evidence: "Synthetic exact settlement"})
+	require.NoError(t, err)
+	assert.EqualValues(t, 555, record.Quota)
+	assert.Zero(t, record.NetFen)
+	var account AgentSimpleAccount
+	require.NoError(t, DB.First(&account, agent.UserID).Error)
+	assert.Zero(t, account.CashQuota)
+	assert.EqualValues(t, 555, getUserBalances(t, agent.UserID).QuotaPaid)
+	replay, err := SettleAgentSimpleExit(root, AgentSimpleExitRequest{RequestID: "a07-exit-all-wallet", AgentUserID: agent.UserID, Source: "cash", Target: "wallet", SettleAll: true, Reason: "Settle exact remaining balance", Evidence: "Synthetic exact settlement"})
+	require.NoError(t, err)
+	assert.Equal(t, record.ID, replay.ID)
+}

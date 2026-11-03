@@ -117,10 +117,16 @@ const actionFields: Record<string, ActionField[]> = {
       name: 'quota',
       label: 'Amount ($)',
       kind: 'text',
+      required: false,
       validate: (value) =>
-        (parseAgentQuota(String(value)) ?? 0) > 0
+        !String(value).trim() || (parseAgentQuota(String(value)) ?? 0) > 0
           ? undefined
           : 'Enter a valid amount',
+    },
+    {
+      name: 'settle_all',
+      label: 'Settle all available balance',
+      kind: 'checkbox',
     },
     {
       name: 'source',
@@ -585,10 +591,12 @@ function RootActionForm(props: {
           })
         }
         if (props.action === 'exit') {
+          const settleAll = values.settle_all === true
           await settleSimpleExit({
             request_id: id,
             agent_user_id: props.agent.agent_user_id,
-            quota: quota('quota'),
+            quota: settleAll ? 0 : quota('quota'),
+            settle_all: settleAll,
             source: String(values.source),
             target: String(values.target),
             reason: String(values.reason),

@@ -13,6 +13,7 @@ type AgentSimpleExitRequest struct {
 	RequestID   string `json:"request_id"`
 	AgentUserID int    `json:"agent_user_id"`
 	Quota       int64  `json:"quota"`
+	SettleAll   bool   `json:"settle_all"`
 	Source      string `json:"source"`
 	Target      string `json:"target"`
 	Reason      string `json:"reason"`
@@ -39,7 +40,7 @@ func (*AgentSimpleExitRecord) BeforeDelete(*gorm.DB) error { return ErrAgentSimp
 // SettleAgentSimpleExit records root's support-assisted disposition. A cash
 // refund is a recorded external result; this operation never sends money.
 func SettleAgentSimpleExit(identity AuthSessionIdentity, request AgentSimpleExitRequest) (*AgentSimpleExitRecord, error) {
-	if validateAgentSimpleRequestID(request.RequestID) != nil || request.AgentUserID <= 0 || validateAgentSimpleAmount(request.Quota) != nil || (request.Source != "cash" && request.Source != "income") || (request.Target != "wallet" && request.Target != "refund") || (request.Target == "refund" && request.Source != "cash") || strings.TrimSpace(request.Reason) == "" || len(request.Reason) > 255 || strings.TrimSpace(request.Evidence) == "" || len(request.Evidence) > 255 {
+	if validateAgentSimpleRequestID(request.RequestID) != nil || request.AgentUserID <= 0 || (!request.SettleAll && validateAgentSimpleAmount(request.Quota) != nil) || (request.SettleAll && request.Quota != 0) || (request.Source != "cash" && request.Source != "income") || (request.Target != "wallet" && request.Target != "refund") || (request.Target == "refund" && request.Source != "cash") || strings.TrimSpace(request.Reason) == "" || len(request.Reason) > 255 || strings.TrimSpace(request.Evidence) == "" || len(request.Evidence) > 255 {
 		return nil, ErrAgentSimpleInvalid
 	}
 	var record AgentSimpleExitRecord
@@ -64,6 +65,16 @@ func SettleAgentSimpleExit(identity AuthSessionIdentity, request AgentSimpleExit
 		}
 		if account.Status == AgentSimpleStatusActive || account.CreditOutstandingQuota > 0 || account.PaymentDebtQuota > 0 {
 			return ErrAgentSimpleState
+		}
+		if request.SettleAll {
+			if request.Source == "cash" {
+				request.Quota = account.CashQuota
+			} else {
+				request.Quota = account.RewardQuota + account.PaymentQuota
+			}
+			if request.Quota <= 0 {
+				return ErrAgentSimpleInvalid
+			}
 		}
 		before := *account
 		if request.Source == "cash" {
